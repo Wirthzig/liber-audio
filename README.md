@@ -70,11 +70,6 @@ graph TD
 ### 🎥 Smart "Topic" Extraction
 *   We don't just search YouTube. The algorithm prioritizes **"Topic" Channels** (Official Artist Audio) to avoid music videos with intros/outros/skits.
 
-### 📊 Privacy-Friendly Analytics
-*   The app sends **anonymous usage counters** (app starts and number of finished downloads) tied to a random install ID generated on first launch.
-*   **Never collected**: track titles, playlist names, Spotify accounts, IP addresses, or any personal data.
-*   Opt out anytime via the checkbox in the Welcome/Help overlay (the `?` button).
-
 ---
 
 ## ❓ Troubleshooting: "App is Damaged"?

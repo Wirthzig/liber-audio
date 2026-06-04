@@ -427,7 +427,6 @@ const getSpotifyUserToken = async (): Promise<string | null> => {
 // random UUID created on first launch — it identifies this INSTALL, never
 // a person. No track titles, no playlists, no Spotify identity, no IPs.
 // Fully fire-and-forget: any failure is swallowed, the app never notices.
-// Users can opt out via the toggle in the Help/Welcome overlay.
 const ANALYTICS_PATH = path.join(APP_SUPPORT, 'analytics.json');
 
 interface AnalyticsState {
@@ -947,15 +946,6 @@ app.whenReady().then(async () => {
                 else resolve({ success: false, error: stderrOutput || `Exit code ${code}` });
             });
         });
-    });
-
-    // --- ANALYTICS OPT-OUT IPC ---
-    ipcMain.handle('analytics-get-enabled', () => analyticsState.enabled);
-    ipcMain.handle('analytics-set-enabled', (_, enabled: boolean) => {
-        analyticsState.enabled = !!enabled;
-        if (!analyticsState.enabled) analyticsState.pendingDownloads = 0; // discard unsent counts on opt-out
-        saveAnalyticsState();
-        return analyticsState.enabled;
     });
 
     app.on('activate', () => {

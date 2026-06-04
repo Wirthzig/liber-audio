@@ -20,12 +20,9 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
     const [syncCount, setSyncCount] = useState<number | null>(null);
     const [lastAdded, setLastAdded] = useState(0);
 
-    const [analyticsEnabled, setAnalyticsEnabled] = useState(true);
-
     // Restore Spotify session + refresh the library index on startup
     useEffect(() => {
         window.electronAPI.spotifyGetToken?.().then(t => setIsLoggedIn(!!t)).catch(() => { });
-        window.electronAPI.getAnalyticsEnabled?.().then(setAnalyticsEnabled).catch(() => { });
         LibraryManager.refresh().then(() => {
             const n = LibraryManager.getIndex().size;
             if (n > 0) setSyncCount(n);
@@ -198,24 +195,6 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                             </p>
 
                             {/* Spotify Setup Removed - Handled by Backend */}
-
-                            {/* Anonymous Analytics Opt-Out */}
-                            <label className="flex items-center space-x-3 mb-8 cursor-pointer group/analytics">
-                                <input
-                                    type="checkbox"
-                                    checked={analyticsEnabled}
-                                    onChange={async (e) => {
-                                        const v = e.target.checked;
-                                        setAnalyticsEnabled(v);
-                                        await window.electronAPI.setAnalyticsEnabled?.(v);
-                                    }}
-                                    className="w-4 h-4 accent-white cursor-pointer"
-                                />
-                                <span className="text-xs text-gray-500 group-hover/analytics:text-gray-300 transition-colors text-left">
-                                    Share anonymous usage statistics — counts of app starts &amp; downloads only.
-                                    Never any titles, playlists, accounts or personal data.
-                                </span>
-                            </label>
 
                             <button
                                 onClick={dismissOnboarding}

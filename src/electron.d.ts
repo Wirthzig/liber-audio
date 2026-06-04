@@ -8,8 +8,6 @@ export interface ElectronAPI {
     spotifyLogin: () => Promise<{ success: boolean; error?: string }>;
     spotifyGetToken: () => Promise<string | null>;
     spotifyLogout: () => Promise<{ success: boolean; error?: string }>;
-    getAnalyticsEnabled: () => Promise<boolean>;
-    setAnalyticsEnabled: (enabled: boolean) => Promise<boolean>;
 }
 
 declare global {

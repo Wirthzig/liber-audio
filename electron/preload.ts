@@ -10,6 +10,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     spotifyLogin: () => ipcRenderer.invoke('spotify-login'),
     spotifyGetToken: () => ipcRenderer.invoke('spotify-get-token'),
     spotifyLogout: () => ipcRenderer.invoke('spotify-logout'),
-    getAnalyticsEnabled: () => ipcRenderer.invoke('analytics-get-enabled'),
-    setAnalyticsEnabled: (enabled: boolean) => ipcRenderer.invoke('analytics-set-enabled', enabled),
 });
