@@ -1,9 +1,10 @@
 import axios from 'axios';
-import { AlertCircle, Check, ChevronLeft, Coffee, DownloadCloud, FolderOpen, FolderSync, Loader2, LogIn, LogOut, Search, Square } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { AlertCircle, Check, ChevronLeft, Coffee, DownloadCloud, FolderOpen, Loader2, Search, Square } from 'lucide-react';
+import { useRef, useState } from 'react';
 import Logo from '../assets/spotify-logo.png'; // Re-use logo (make sure it looks good on dark)
 import { HistoryManager } from '../utils/historyManager';
-import { DOWNLOAD_CONCURRENCY, normalizeForMatch } from '../utils/matching';
+import { LibraryManager } from '../utils/libraryManager';
+import { DOWNLOAD_CONCURRENCY } from '../utils/matching';
 
 interface Song {
     id: string;
@@ -30,30 +31,7 @@ export function SpotifyView({ onBack }: Props) {
     const [statusMsg, setStatusMsg] = useState('Ready');
     const [targetFolder, setTargetFolder] = useState<string | null>(localStorage.getItem('target_folder'));
     const [isProcessing, setIsProcessing] = useState(false);
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
     const abortRef = useRef(false);
-
-    // Check if the user already has a Spotify session
-    useEffect(() => {
-        window.electronAPI.spotifyGetToken?.().then(t => setIsLoggedIn(!!t)).catch(() => { });
-    }, []);
-
-    const handleLogin = async () => {
-        setStatusMsg('Complete the login in your browser...');
-        const res = await window.electronAPI.spotifyLogin();
-        if (res.success) {
-            setIsLoggedIn(true);
-            setStatusMsg('Logged in — private playlists unlocked!');
-        } else {
-            setStatusMsg(res.error || 'Login failed');
-        }
-    };
-
-    const handleLogout = async () => {
-        await window.electronAPI.spotifyLogout();
-        setIsLoggedIn(false);
-        setStatusMsg('Logged out');
-    };
 
     const getSpotifyToken = async () => {
         // Prefer the user's own session (works for private playlists, no backend wait)
@@ -118,11 +96,13 @@ export function SpotifyView({ onBack }: Props) {
         }
 
         const toSong = (track: any, extraArtist?: string): Song => {
-            const isDownloaded = HistoryManager.has(track.id);
+            const artist = track.artists?.map((a: any) => a.name).join(', ') || extraArtist || 'Unknown Artist';
+            // Already downloaded before, or already present in the synced library folder
+            const isDownloaded = HistoryManager.has(track.id) || LibraryManager.has(artist, track.name);
             return {
                 id: track.id,
                 title: track.name,
-                artist: track.artists?.map((a: any) => a.name).join(', ') || extraArtist || 'Unknown Artist',
+                artist,
                 status: isDownloaded ? 'exists' : 'pending',
                 isSelected: !isDownloaded,
                 isPreviouslyDownloaded: isDownloaded,
@@ -173,7 +153,7 @@ export function SpotifyView({ onBack }: Props) {
     };
 
     const selectFolder = async () => {
-        const path = await window.electronAPI.selectFolder();
+        const path = await window.electronAPI.selectFolder('Choose the download output folder');
         if (path) {
             setTargetFolder(path);
             localStorage.setItem('target_folder', path);
@@ -273,46 +253,6 @@ export function SpotifyView({ onBack }: Props) {
         setStatusMsg(abortRef.current ? 'Stopped' : 'All Done');
     };
 
-    // Scan the target folder for already-downloaded files ("Artist - Title.m4a")
-    // and mark matching tracks so they won't be re-downloaded.
-    const syncFolder = async () => {
-        if (!targetFolder) {
-            alert('Please select a download folder first.');
-            return;
-        }
-        if (songs.length === 0) {
-            setStatusMsg('Scan a playlist first, then sync');
-            return;
-        }
-
-        setStatusMsg('Scanning folder...');
-        const res = await window.electronAPI.scanLibrary(targetFolder);
-        if (!res.success || !res.files) {
-            setStatusMsg(res.error || 'Folder scan failed');
-            return;
-        }
-
-        const fileSet = new Set(res.files.map(normalizeForMatch));
-        let matched = 0;
-        const newSongs = songs.map(s => {
-            if (s.status === 'downloaded' || s.status === 'exists') return s;
-            if (fileSet.has(normalizeForMatch(`${s.artist} - ${s.title}`))) {
-                matched++;
-                HistoryManager.add({
-                    id: s.id,
-                    source: 'spotify',
-                    title: s.title,
-                    artist: s.artist,
-                    timestamp: Date.now()
-                });
-                return { ...s, status: 'exists' as const, isSelected: false, isPreviouslyDownloaded: true };
-            }
-            return s;
-        });
-        setSongs(newSongs);
-        setStatusMsg(matched > 0 ? `Synced: found ${matched} track(s) already in your folder` : 'No matching files found in folder');
-    };
-
     const stopProcess = () => {
         abortRef.current = true;
         setStatusMsg('Stopping...');
@@ -374,34 +314,6 @@ export function SpotifyView({ onBack }: Props) {
 
                 {/* Sidebar */}
                 <div className="col-span-1 space-y-6">
-                    {/* Account Box */}
-                    <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)]">
-                        <h2 className="text-xs font-black text-[#1DB954] uppercase mb-4 tracking-widest">Account</h2>
-                        {isLoggedIn ? (
-                            <div className="flex items-center gap-2">
-                                <span className="flex-1 text-xs font-bold text-[#1DB954] bg-[#1DB954]/10 border border-[#1DB954]/30 rounded-xl py-3 px-4 uppercase tracking-wide">
-                                    ✓ Logged In · Private Playlists OK
-                                </span>
-                                <button onClick={handleLogout} title="Log out" className="p-3 rounded-xl bg-black/40 border border-white/10 text-[#1DB954]/60 hover:text-[#1DB954] transition-colors">
-                                    <LogOut size={18} />
-                                </button>
-                            </div>
-                        ) : (
-                            <button
-                                onClick={handleLogin}
-                                className="w-full bg-black/40 hover:bg-[#1DB954]/10 border border-[#1DB954]/50 text-[#1DB954] py-3 rounded-xl flex items-center justify-center text-sm transition-colors font-bold uppercase tracking-wide"
-                            >
-                                <LogIn size={18} className="mr-2" />
-                                Login with Spotify
-                            </button>
-                        )}
-                        {!isLoggedIn && (
-                            <p className="text-[10px] text-[#1DB954]/40 mt-3 leading-relaxed">
-                                Optional — unlocks your private playlists and skips the backend wait.
-                            </p>
-                        )}
-                    </div>
-
                     {/* Input Box */}
                     <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)]">
                         <h2 className="text-xs font-black text-[#1DB954] uppercase mb-4 tracking-widest relative z-10">Playlist URL</h2>
@@ -422,17 +334,8 @@ export function SpotifyView({ onBack }: Props) {
                     {/* Folder & DL Actions */}
                     <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)]">
                         <button onClick={selectFolder} className="w-full mb-4 bg-black/40 hover:bg-black/60 border border-white/10 text-[#1DB954] py-3 rounded-xl flex items-center justify-center text-sm transition-colors font-bold uppercase tracking-wide">
-                            <FolderOpen size={18} className="mr-2" />
-                            {targetFolder ? 'Folder Selected' : 'Choose Output'}
-                        </button>
-
-                        <button
-                            onClick={syncFolder}
-                            title="Scan your folder for songs you already have and mark them as done"
-                            className="w-full mb-4 bg-black/40 hover:bg-black/60 border border-white/10 text-[#1DB954]/80 hover:text-[#1DB954] py-3 rounded-xl flex items-center justify-center text-sm transition-colors font-bold uppercase tracking-wide"
-                        >
-                            <FolderSync size={18} className="mr-2" />
-                            Sync Folder
+                            <FolderOpen size={18} className="mr-2 shrink-0" />
+                            <span className="truncate">{targetFolder ? `Output: ${targetFolder.split('/').pop()}` : 'Choose Output'}</span>
                         </button>
 
                         <div className="flex gap-2">

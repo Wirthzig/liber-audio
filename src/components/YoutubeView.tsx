@@ -2,6 +2,7 @@ import { Check, ChevronLeft, DownloadCloud, FolderOpen, Loader2, Search, Square 
 import { useRef, useState } from 'react';
 import Logo from '../assets/youtube-logo.png'; // Re-using existing logo
 import { HistoryManager } from '../utils/historyManager';
+import { LibraryManager } from '../utils/libraryManager';
 import { DOWNLOAD_CONCURRENCY } from '../utils/matching';
 
 interface Song {
@@ -39,7 +40,7 @@ export function YoutubeView({ onBack }: Props) {
             const res = await window.electronAPI.fetchMetadata(url);
             if (res.success && res.tracks) {
                 const newSongs = res.tracks.map((t: any) => {
-                    const isDownloaded = HistoryManager.has(t.id);
+                    const isDownloaded = HistoryManager.has(t.id) || LibraryManager.has(t.artist, t.title);
                     return {
                         id: t.id,
                         title: t.title,
@@ -67,7 +68,7 @@ export function YoutubeView({ onBack }: Props) {
     };
 
     const selectFolder = async () => {
-        const path = await window.electronAPI.selectFolder();
+        const path = await window.electronAPI.selectFolder('Choose the download output folder');
         if (path) {
             setTargetFolder(path);
             localStorage.setItem('target_folder', path);
@@ -200,8 +201,8 @@ export function YoutubeView({ onBack }: Props) {
 
                     <div className="bg-[#ff0000] p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] border border-white/10">
                         <button onClick={selectFolder} className="w-full mb-4 bg-black/20 hover:bg-black/30 border-2 border-transparent py-3 rounded-xl flex items-center justify-center text-sm transition-colors text-sm font-bold text-white uppercase tracking-wide">
-                            <FolderOpen size={18} className="mr-2 stroke-[2.5]" />
-                            {targetFolder ? 'Folder Selected' : 'Choose Folder'}
+                            <FolderOpen size={18} className="mr-2 stroke-[2.5] shrink-0" />
+                            <span className="truncate">{targetFolder ? `Output: ${targetFolder.split('/').pop()}` : 'Choose Folder'}</span>
                         </button>
 
                         <div className="flex gap-2">

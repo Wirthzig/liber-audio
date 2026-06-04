@@ -6,11 +6,13 @@ import { autoUpdater } from 'electron-updater';
 import fs from 'fs';
 import http from 'http';
 import https from 'https';
+import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const nodeRequire = createRequire(import.meta.url);
 
 // --- Dependency Manager ---
 const APP_SUPPORT = app.getPath('userData');
@@ -22,7 +24,74 @@ const SEARCH_CACHE_PATH = path.join(APP_SUPPORT, 'search-cache.json');
 // --- YTMusic API Setup ---
 let ytmusic: any = null;
 let isYtMusicReady = false;
+let ytmusicFailStreak = 0; // consecutive hard (non-429) failures
+let ytmusicDisabled = false; // skip Tier 1 for the session once it's clearly broken
 let lastSearchTime = 0;
+
+// --- SELF-UPDATING SEARCH MODULE ---
+// The YTMusic search library is bundled into one self-contained file that
+// lives in the GitHub repo (search-module/). On startup we compare versions
+// and download a newer bundle if available — so search fixes reach users
+// WITHOUT a full app release. Falls back to the built-in copy on any failure.
+const SEARCH_MODULE_DIR = path.join(APP_SUPPORT, 'search-module');
+const SEARCH_MODULE_PATH = path.join(SEARCH_MODULE_DIR, 'ytmusic-bundle.cjs');
+const SEARCH_MODULE_VERSION_PATH = path.join(SEARCH_MODULE_DIR, 'version.json');
+const SEARCH_MODULE_BASE = 'https://raw.githubusercontent.com/Wirthzig/LiberAudio/main/search-module';
+
+let searchModuleChecked = false;
+
+const updateSearchModule = async (): Promise<void> => {
+    if (searchModuleChecked) return; // once per session
+    searchModuleChecked = true;
+
+    const res = await fetch(`${SEARCH_MODULE_BASE}/version.json`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error(`version fetch failed: ${res.status}`);
+    const remote = await res.json();
+
+    let localVersion: string | null = null;
+    try {
+        localVersion = JSON.parse(fs.readFileSync(SEARCH_MODULE_VERSION_PATH, 'utf-8')).version;
+    } catch { /* no local copy yet */ }
+
+    if (localVersion === remote.version && fs.existsSync(SEARCH_MODULE_PATH)) {
+        console.log(`[SearchModule] Up to date (${localVersion}).`);
+        return;
+    }
+
+    console.log(`[SearchModule] Updating search module: ${localVersion ?? '(built-in)'} -> ${remote.version}`);
+    const bundleRes = await fetch(`${SEARCH_MODULE_BASE}/ytmusic-bundle.cjs`, { signal: AbortSignal.timeout(30000) });
+    if (!bundleRes.ok) throw new Error(`bundle fetch failed: ${bundleRes.status}`);
+    const buf = Buffer.from(await bundleRes.arrayBuffer());
+    if (buf.length < 50_000) throw new Error('bundle suspiciously small, refusing');
+
+    fs.mkdirSync(SEARCH_MODULE_DIR, { recursive: true });
+    fs.writeFileSync(SEARCH_MODULE_PATH, buf);
+    fs.writeFileSync(SEARCH_MODULE_VERSION_PATH, JSON.stringify(remote));
+    console.log(`[SearchModule] Updated to ${remote.version} ✅`);
+};
+
+const loadYtMusicClass = async (): Promise<any> => {
+    try {
+        await updateSearchModule();
+    } catch (e: any) {
+        console.warn('[SearchModule] Update check failed (offline?):', e.message);
+    }
+
+    // Prefer the downloaded (newer) bundle
+    try {
+        if (fs.existsSync(SEARCH_MODULE_PATH)) {
+            const mod = nodeRequire(SEARCH_MODULE_PATH);
+            console.log('[SearchModule] Using downloaded search module.');
+            return mod.default || mod;
+        }
+    } catch (e) {
+        console.warn('[SearchModule] Downloaded module failed to load, using built-in:', e);
+    }
+
+    const mod = await import('ytmusic-api');
+    console.log('[SearchModule] Using built-in search module.');
+    return mod.default || mod;
+};
 
 // URLs
 const YT_DLP_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
@@ -284,9 +353,9 @@ const spotifyLogin = (): Promise<{ success: boolean; error?: string }> => {
                 const returnedState = reqUrl.searchParams.get('state');
                 const error = reqUrl.searchParams.get('error');
 
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end('<html><body style="font-family:sans-serif;background:#000;color:#1DB954;display:flex;align-items:center;justify-content:center;height:100vh"><h1>' +
-                    (code ? '✅ Logged in! You can close this tab and return to LiberAudio.' : '❌ Login failed. You can close this tab.') +
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.end('<html><head><meta charset="utf-8"></head><body style="font-family:sans-serif;background:#000;color:#1DB954;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><h1>' +
+                    (code ? '✅ Logged in!<br><span style="font-size:.5em;color:#1DB95499">You can close this tab and return to LiberAudio.</span>' : '❌ Login failed.<br><span style="font-size:.5em;color:#ff444499">You can close this tab and try again.</span>') +
                     '</h1></body></html>');
 
                 if (error || !code || returnedState !== state) {
@@ -319,7 +388,11 @@ const spotifyLogin = (): Promise<{ success: boolean; error?: string }> => {
                 authUrl.searchParams.set('code_challenge', challenge);
                 authUrl.searchParams.set('state', state);
                 authUrl.searchParams.set('scope', SPOTIFY_SCOPES);
-                shell.openExternal(authUrl.href);
+                console.log('[Spotify] Opening browser for login:', authUrl.href);
+                shell.openExternal(authUrl.href).catch((e) => {
+                    console.error('[Spotify] Failed to open browser:', e);
+                    finish({ success: false, error: 'Could not open the browser. Please try again.' });
+                });
             });
 
             // Give up after 5 minutes
@@ -354,18 +427,21 @@ app.whenReady().then(async () => {
     loadSearchCache();
     createWindow();
 
-    // Initialize YTMusic (Dynamic Import)
-    try {
-        const mod = await import('ytmusic-api');
-        const YTMusicClass = mod.default || mod;
-        ytmusic = new YTMusicClass();
-        await ytmusic.initialize();
-        isYtMusicReady = true;
-        console.log('[Main] YTMusic API Initialized 🎵');
-    } catch (e) {
-        console.error('[Main] Failed to init YTMusic:', e);
-        // Do not block app, just log error. Handlers will fallback to Tier 2.
-    }
+    // Initialize YTMusic in the background — do NOT await it here, otherwise
+    // IPC handler registration is delayed and early renderer calls
+    // ('init-dependencies') fail with "No handler registered".
+    (async () => {
+        try {
+            const YTMusicClass = await loadYtMusicClass();
+            ytmusic = new YTMusicClass();
+            await ytmusic.initialize();
+            isYtMusicReady = true;
+            console.log('[Main] YTMusic API Initialized 🎵');
+        } catch (e) {
+            console.error('[Main] Failed to init YTMusic:', e);
+            // Do not block app, just log error. Handlers will fallback to Tier 2.
+        }
+    })();
 
     // Check for updates immediately
     console.log('[Main] Checking for updates...');
@@ -381,8 +457,12 @@ app.whenReady().then(async () => {
         return { success: true };
     });
 
-    ipcMain.handle('select-folder', async () => {
-        const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    ipcMain.handle('select-folder', async (_, title?: string) => {
+        const result = await dialog.showOpenDialog({
+            properties: ['openDirectory'],
+            title: title || 'Choose Folder',
+            message: title || 'Choose Folder', // macOS shows 'message', not 'title'
+        });
         return result.canceled ? null : result.filePaths[0];
     });
 
@@ -617,8 +697,7 @@ app.whenReady().then(async () => {
         if (!isYtMusicReady || !ytmusic) {
             console.warn('[Main] YTMusic not ready, trying to init...');
             try {
-                const mod = await import('ytmusic-api');
-                const YTMusicClass = mod.default || mod;
+                const YTMusicClass = await loadYtMusicClass();
                 ytmusic = new YTMusicClass();
                 await ytmusic.initialize();
                 isYtMusicReady = true;
@@ -664,7 +743,7 @@ app.whenReady().then(async () => {
         lastSearchTime = Date.now();
 
         // --- TIER 1: YouTube Music (in-process API) ---
-        if (isYtMusicReady && ytmusic) {
+        if (isYtMusicReady && ytmusic && !ytmusicDisabled) {
             console.log('[Tier 1] Searching YTMusic...');
             let retries = 0;
             const maxRetries = 2;
@@ -682,6 +761,7 @@ app.whenReady().then(async () => {
                         }));
 
                     const best = pickBestMatch(candidates, targetTitle, targetArtist, targetDuration, 'Tier 1');
+                    ytmusicFailStreak = 0; // the API itself works
                     if (best) {
                         const url = `https://music.youtube.com/watch?v=${best.id}`;
                         cacheSearchResult(cacheKey, url);
@@ -698,6 +778,13 @@ app.whenReady().then(async () => {
                         await sleep(backoff);
                         retries++;
                     } else {
+                        // Hard failure (e.g. 400 after a YouTube backend change).
+                        // After a few in a row, stop wasting time on Tier 1 this session.
+                        ytmusicFailStreak++;
+                        if (ytmusicFailStreak >= 3) {
+                            ytmusicDisabled = true;
+                            console.warn('[Tier 1] Disabled for this session after repeated failures.');
+                        }
                         break;
                     }
                 }
@@ -706,11 +793,17 @@ app.whenReady().then(async () => {
             console.warn('[Tier 1] Skipped (YTMusic not ready).');
         }
 
-        // --- TIER 2 & 3: yt-dlp (YouTube Music, then normal YouTube) ---
-        for (const [tier, prefix] of [['Tier 2', 'ytmsearch5'], ['Tier 3', 'ytsearch5']] as const) {
-            console.log(`[Main] Falling back to ${tier}: yt-dlp (${prefix})...`);
-            try {
-                const results = await searchYtDlp(query, prefix);
+        // --- TIER 2 & 3: yt-dlp (YouTube Music + normal YouTube, IN PARALLEL) ---
+        // Both subprocess searches run concurrently; Tier 2 results are
+        // preferred when both verify. Saves one full search round-trip.
+        console.log('[Main] Falling back to Tier 2+3: yt-dlp (parallel ytmsearch5 + ytsearch5)...');
+        try {
+            const [musicResults, normalResults] = await Promise.all([
+                searchYtDlp(query, 'ytmsearch5'),
+                searchYtDlp(query, 'ytsearch5'),
+            ]);
+
+            for (const [tier, results] of [['Tier 2', musicResults], ['Tier 3', normalResults]] as const) {
                 const candidates: SearchCandidate[] = results.map((r: any) => ({
                     id: r.id,
                     title: r.title || '',
@@ -724,9 +817,9 @@ app.whenReady().then(async () => {
                     cacheSearchResult(cacheKey, url);
                     return url;
                 }
-            } catch (e) {
-                console.error(`[${tier}] Error:`, e);
             }
+        } catch (e) {
+            console.error('[Tier 2/3] Error:', e);
         }
 
         return null; // Give up

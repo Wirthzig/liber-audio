@@ -1,9 +1,10 @@
-import { Coffee, HelpCircle, Rocket, X } from 'lucide-react';
+import { Coffee, FolderCheck, FolderSync, HelpCircle, Loader2, LogIn, Rocket, UserCheck, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import MainLogo from '../assets/main-logo.png';
 import SoundcloudLogo from '../assets/soundcloud-logo.png';
 import SpotifyLogo from '../assets/spotify-logo.png';
 import YoutubeLogo from '../assets/youtube-logo.png';
+import { LibraryManager } from '../utils/libraryManager';
 
 interface Props {
     onSelectService: (service: 'spotify' | 'soundcloud' | 'youtube') => void;
@@ -13,6 +14,50 @@ interface Props {
 export function SplitScreen({ onSelectService, serverConfig }: Props) {
     const [showOnboarding, setShowOnboarding] = useState(false);
     const [showToast, setShowToast] = useState(false);
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [isLoggingIn, setIsLoggingIn] = useState(false);
+    const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'done'>('idle');
+    const [syncCount, setSyncCount] = useState<number | null>(null);
+    const [lastAdded, setLastAdded] = useState(0);
+
+    // Restore Spotify session + refresh the library index on startup
+    useEffect(() => {
+        window.electronAPI.spotifyGetToken?.().then(t => setIsLoggedIn(!!t)).catch(() => { });
+        LibraryManager.refresh().then(() => {
+            const n = LibraryManager.getIndex().size;
+            if (n > 0) setSyncCount(n);
+        });
+    }, []);
+
+    const handleAccountClick = async () => {
+        if (isLoggingIn) return;
+        if (isLoggedIn) {
+            await window.electronAPI.spotifyLogout();
+            setIsLoggedIn(false);
+            return;
+        }
+        setIsLoggingIn(true);
+        const res = await window.electronAPI.spotifyLogin();
+        setIsLoggingIn(false);
+        if (res.success) setIsLoggedIn(true);
+    };
+
+    const handleSyncClick = async () => {
+        if (syncState === 'syncing') return;
+        // NOTE: this picks the LIBRARY folder to scan — it does not touch the
+        // download output folder (that's set via "Choose Output" in each view).
+        const folder = await window.electronAPI.selectFolder('Choose your music library folder to scan');
+        if (!folder) return;
+        setSyncState('syncing');
+        const res = await LibraryManager.sync(folder);
+        setSyncState('done');
+        if (res.success) {
+            setSyncCount(res.count ?? 0);
+            setLastAdded(res.added ?? 0);
+        }
+        setTimeout(() => setSyncState('idle'), 3000);
+    };
+
     useEffect(() => {
         if (serverConfig?.toast && serverConfig.toast.text !== 'None') {
             setShowToast(true);
@@ -68,6 +113,46 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                     <Coffee size={20} className="stroke-[2.5]" />
                     <span className="text-sm">Buy me a Coffee</span>
                 </a>
+
+                {/* Spotify Account Button */}
+                <div className="relative group">
+                    <button
+                        onClick={handleAccountClick}
+                        className="p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] shadow-lg"
+                    >
+                        {isLoggingIn
+                            ? <Loader2 size={24} className="stroke-[2.5] animate-spin" />
+                            : isLoggedIn ? <UserCheck size={24} className="stroke-[2.5]" /> : <LogIn size={24} className="stroke-[2.5]" />}
+                    </button>
+                    <span className="absolute top-full right-0 mt-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 border border-white/10 text-white px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap pointer-events-none shadow-xl z-50">
+                        {isLoggingIn
+                            ? 'Complete the login in your browser…'
+                            : isLoggedIn
+                                ? 'Spotify: logged in ✓ — click to log out'
+                                : 'Login with Spotify — unlocks your private playlists'}
+                    </span>
+                </div>
+
+                {/* Library Sync Button */}
+                <div className="relative group">
+                    <button
+                        onClick={handleSyncClick}
+                        className="p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] shadow-lg"
+                    >
+                        {syncState === 'syncing'
+                            ? <Loader2 size={24} className="stroke-[2.5] animate-spin" />
+                            : syncCount !== null ? <FolderCheck size={24} className="stroke-[2.5]" /> : <FolderSync size={24} className="stroke-[2.5]" />}
+                    </button>
+                    <span className="absolute top-full right-0 mt-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 border border-white/10 text-white px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap pointer-events-none shadow-xl z-50">
+                        {syncState === 'syncing'
+                            ? 'Scanning folder…'
+                            : syncState === 'done'
+                                ? `Synced! +${lastAdded} added · ${syncCount ?? 0} songs total`
+                                : syncCount !== null
+                                    ? `Library: ${syncCount} songs — click to add another folder`
+                                    : 'Sync your music folder — songs you already have won\'t be downloaded again'}
+                    </span>
+                </div>
 
                 {/* Help Button */}
                 <button

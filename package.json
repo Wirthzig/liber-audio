@@ -14,6 +14,7 @@
     "dev": "vite",
     "build": "set -a; [ -f .env ] && . ./.env; set +a; tsc && vite build && electron-builder",
     "checksum": "node scripts/generate_checksum.js",
+    "build:search-module": "node scripts/build_search_module.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -24,7 +25,7 @@
     "lucide-react": "^0.469.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "ytmusic-api": "^5.3.0"
+    "ytmusic-api": "^5.3.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",
@@ -33,7 +34,7 @@
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
-    "electron": "^26.0.0",
+    "electron": "^26.6.10",
     "electron-builder": "^25.1.8",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
