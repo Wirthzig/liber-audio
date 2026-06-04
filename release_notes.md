@@ -1,77 +1,42 @@
-# LiberAudio v1.1.0 - The "Polished & Compatible" Update
+# LiberAudio v1.2.0 — The "Speed & Freedom" Update
 
-We are excited to bring you a massive update focused on User Experience and wider compatibility!
+The biggest update yet: massively faster downloads, login with your own Spotify account, a smart local library, and an app that keeps itself working when platforms change things.
 
 ## 🌟 What's New?
 
-### 🔓 No More API Key Setup!
-**Major Change:** We now host our own dedicated backend service to handle Spotify authentication.
-- **Plug & Play**: You no longer need to create a Spotify Developer account or copy-paste Client IDs/Secrets.
-- **Zero Configuration**: Just open the app and start downloading immediately. It's that simple.
+### ⚡ Seriously Faster Downloads
+- **Parallel downloading**: up to 3 tracks download at the same time, while the next songs are already being searched in the background.
+- **No more re-encoding**: audio is now stream-copied in its native quality instead of being converted — post-processing went from seconds to instant.
+- **Native Apple Silicon**: M-series Macs now get a native arm64 audio engine (previously ran through Rosetta translation).
+- **Smarter search**: results are verified against the track duration, covers/remixes/karaoke are filtered out, and search results are cached permanently — re-scanning a playlist costs zero time.
 
-### 🎨 Beautiful New UX (Glassmorphism)
-We've completely overhauled the visual experience:
-- **Sleek Overlays**: Error messages and loading states now feature a modern, blurry "frosted glass" look.
-- **Smart Loading**: Loading spinners now appear elegantly *inside* your track lists.
-- **Improved Buttons**: The main action buttons are now bolder and clearer.
-- **Private Playlists**: Get notified if you've passed a URL that we can't access.
+### 🔐 Login with Spotify (Optional)
+- Click the new account button on the home screen and approve in your browser — done.
+- **Unlocks your private playlists** and skips the shared-backend wait entirely.
+- No password ever touches the app (standard OAuth/PKCE flow, tokens stay on your Mac).
 
-### 🍏 Broader macOS Support
-- **Now Compatible with macOS 10.13 (High Sierra) and newer!** (Previously required 10.15+)
-- We've rebuilt the app engine to support older Intel machines.
+### 🗂 Local Library Sync
+- New home-screen button: pick your music folder(s) and LiberAudio remembers what you already own.
+- Works across **all three platforms** — scanned playlists automatically mark songs you already have, so nothing is ever downloaded twice.
+- Folders are re-scanned on every start, and you can add as many as you like.
 
-### ⚡ Smarter Spotify Backend
-- **Wake-up Timer**: Using our free backend? We added a helpful timer to let you know if the server is waking up (takes ~1-2 mins).
-- **Auto-Retry**: Increased timeouts to ensure your downloads don't fail just because the server is sleepy.
+### 🛡 Self-Healing Search
+- The YouTube search engine now **updates itself** — when YouTube changes something, fixes reach you automatically on the next app start, no new release required.
+- The downloader (yt-dlp) continues to auto-update as before.
 
----
+### 🎵 More Music Support
+- **Spotify album links** now work (in addition to tracks and playlists).
+- Playlists containing removed or local-only tracks no longer break scanning.
 
-## 📥 Which Version Should I Download?
-
-We now provide two separate versions to ensure maximum performance on your Mac.
-
-### 1. Apple Silicon (M1, M2, M3)
-> [**Universal.Music.Downloader-v1.1.0-macOS-arm64.dmg**](https://github.com/Wirthzig/universal-music-downloader/releases/latest/download/Universal.Music.Downloader-v1.1.0-macOS-arm64.dmg)
-
-**Use this if:**
-- You have a Mac with an **M1, M2, or M3 chip** (2020 or newer).
-- *How to check:* Click the Apple Logo  > About This Mac. If it says "Chip: Apple M1/M2/M3", download this one.
-
-### 2. Intel Macs (Older Models)
-> [**Universal.Music.Downloader-v1.1.0-macOS-x64.dmg**](https://github.com/Wirthzig/universal-music-downloader/releases/latest/download/Universal.Music.Downloader-v1.1.0-macOS-x64.dmg)
-
-**Use this if:**
-- You have a Mac with an **Intel Processor** (Most Macs before late 2020).
-- *How to check:* Click the Apple Logo  > About This Mac. If it says "Processor: Intel Core i...", download this one.
+### 🐛 Fixes & Polish
+- Songs with special characters (`/`, `:`, …) in the title no longer fail.
+- Clearer folder pickers: the output folder button now shows the selected folder name, and dialogs say what they're for.
+- Numerous stability fixes (startup races, crash on missing downloader, stuck loading states).
 
 ---
-
-## 🛠️ Required Setup (One-Time Fix)
-
-Because this app is open-source and not signed by Apple ($99/yr), macOS will quarantine it by default.
-
-**If you see "App is damaged" or can't open it:**
-1.  Move the App to your **Applications** folder.
-2.  Open **Terminal**.
-3.  Paste this command and hit Enter:
-    ```bash
-    sudo xattr -cr /Applications/Universal\ Music\ Downloader.app
-    ```
-4.  Enter your password (it won't show while typing) and hit Enter.
-5.  Open the app!
+**First time opening the app?** macOS will warn about an unidentified developer — see the quick fix on our [download page](https://wirthzig.github.io/LiberAudio/#gatekeeper).
 
 ---
-
-### ⚠️ Legal Disclaimer
-This software is a **Proof of Concept** designed strictly for educational purposes.
-*   **Do not use this tool to download copyrighted content.** You must respect the Terms of Service of Spotify, SoundCloud, and YouTube.
-*   The authors and contributors are **not responsible** for any misuse of this software or any legal consequences arising from its use.
-*   **For Personal Use Only.** Do not distribute or sell this software.
-
----
-
-### ☕ Support Us
-If you enjoy the app, consider buying us a coffee! It helps us keep the backend servers awake and the updates coming.
-[**Buy us a Coffee on Ko-fi**](https://ko-fi.com/liberaudio)
-
-*Happy Downloading!* 🎵
+**Download below** — pick the file matching your Mac:
+- **Apple Silicon** (M1/M2/M3/M4): `LiberAudio-v1.2.0-macOS-arm64.dmg`
+- **Intel**: `LiberAudio-v1.2.0-macOS-x64.dmg`
