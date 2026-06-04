@@ -1,6 +1,10 @@
 import { execFile, spawn } from 'child_process';
+import crypto from 'crypto';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import log from 'electron-log';
+import { autoUpdater } from 'electron-updater';
 import fs from 'fs';
+import http from 'http';
 import https from 'https';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -12,17 +16,41 @@ const __dirname = path.dirname(__filename);
 const APP_SUPPORT = app.getPath('userData');
 const YT_DLP_PATH = path.join(APP_SUPPORT, 'yt-dlp');
 const FFMPEG_PATH = path.join(APP_SUPPORT, 'ffmpeg');
+const FFMPEG_ARCH_MARKER = path.join(APP_SUPPORT, 'ffmpeg-arch');
+const SEARCH_CACHE_PATH = path.join(APP_SUPPORT, 'search-cache.json');
 
 // --- YTMusic API Setup ---
 let ytmusic: any = null;
 let isYtMusicReady = false;
-const searchCache = new Map<string, string>();
 let lastSearchTime = 0;
 
 // URLs
 const YT_DLP_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
-// Static FFmpeg build for macOS (Universal or 64-bit)
-const FFMPEG_URL = 'https://evermeet.cx/ffmpeg/getrelease/zip';
+// Static FFmpeg builds with native arm64 support (evermeet.cx only ships x86_64,
+// which forces Rosetta emulation on Apple Silicon and slows down every conversion)
+const FFMPEG_ARCH = process.arch === 'arm64' ? 'arm64' : 'x64';
+const FFMPEG_URL = `https://github.com/eugeneware/ffmpeg-static/releases/latest/download/ffmpeg-darwin-${FFMPEG_ARCH}`;
+
+// --- Persistent Search Cache ---
+const searchCache = new Map<string, string>();
+const loadSearchCache = () => {
+    try {
+        if (fs.existsSync(SEARCH_CACHE_PATH)) {
+            const data = JSON.parse(fs.readFileSync(SEARCH_CACHE_PATH, 'utf-8'));
+            for (const [k, v] of Object.entries(data)) searchCache.set(k, v as string);
+            console.log(`[Main] Loaded ${searchCache.size} cached search results.`);
+        }
+    } catch (e) { console.warn('[Main] Failed to load search cache:', e); }
+};
+const saveSearchCache = () => {
+    try {
+        fs.writeFileSync(SEARCH_CACHE_PATH, JSON.stringify(Object.fromEntries(searchCache)));
+    } catch (e) { console.warn('[Main] Failed to save search cache:', e); }
+};
+const cacheSearchResult = (key: string, url: string) => {
+    searchCache.set(key, url);
+    saveSearchCache();
+};
 
 const downloadFile = (url: string, dest: string) => {
     return new Promise<void>((resolve, reject) => {
@@ -42,6 +70,10 @@ const downloadFile = (url: string, dest: string) => {
             }
             const file = fs.createWriteStream(dest);
             response.pipe(file);
+            file.on('error', (err: Error) => {
+                fs.unlink(dest, () => { });
+                reject(err);
+            });
             file.on('finish', () => {
                 file.close();
                 resolve();
@@ -54,54 +86,83 @@ const downloadFile = (url: string, dest: string) => {
     });
 };
 
+const getYtDlpLatestVersion = (): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        https.get('https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest', {
+            headers: { 'User-Agent': 'LiberAudio' }
+        }, (res) => {
+            let data = '';
+            res.on('data', d => data += d);
+            res.on('end', () => {
+                try { resolve(JSON.parse(data).tag_name); } catch (e) { reject(e); }
+            });
+        }).on('error', reject);
+    });
+};
+
 const setupYtDlp = async () => {
     console.log(`[Main] Checking yt-dlp at: ${YT_DLP_PATH}`);
-    if (fs.existsSync(YT_DLP_PATH)) {
-        const stats = fs.statSync(YT_DLP_PATH);
-        if (stats.size > 30 * 1024 * 1024) {
-            fs.chmodSync(YT_DLP_PATH, '755');
-            // Remove quarantine
-            await new Promise<void>(res => execFile('xattr', ['-d', 'com.apple.quarantine', YT_DLP_PATH], () => res()));
-            return;
-        }
-        fs.unlinkSync(YT_DLP_PATH);
+
+    const isMissing = !fs.existsSync(YT_DLP_PATH) || fs.statSync(YT_DLP_PATH).size < 30 * 1024 * 1024;
+    if (isMissing) {
+        if (fs.existsSync(YT_DLP_PATH)) fs.unlinkSync(YT_DLP_PATH);
+        console.log('[Main] yt-dlp missing or corrupt, downloading...');
+        await downloadFile(YT_DLP_URL, YT_DLP_PATH);
+        fs.chmodSync(YT_DLP_PATH, '755');
+        await new Promise<void>(res => execFile('xattr', ['-d', 'com.apple.quarantine', YT_DLP_PATH], () => res()));
+        return;
     }
 
-    console.log('[Main] Downloading yt-dlp...');
-    await downloadFile(YT_DLP_URL, YT_DLP_PATH);
     fs.chmodSync(YT_DLP_PATH, '755');
+    await new Promise<void>(res => execFile('xattr', ['-d', 'com.apple.quarantine', YT_DLP_PATH], () => res()));
+
+    // Check for updates
+    try {
+        const installedVersion = await new Promise<string>((resolve, reject) => {
+            execFile(YT_DLP_PATH, ['--version'], (err, stdout) => {
+                if (err) reject(err); else resolve(stdout.trim());
+            });
+        });
+        const latestVersion = await getYtDlpLatestVersion();
+        console.log(`[Main] yt-dlp installed=${installedVersion} latest=${latestVersion}`);
+
+        if (installedVersion !== latestVersion) {
+            console.log('[Main] yt-dlp update available, downloading...');
+            fs.unlinkSync(YT_DLP_PATH);
+            await downloadFile(YT_DLP_URL, YT_DLP_PATH);
+            fs.chmodSync(YT_DLP_PATH, '755');
+            await new Promise<void>(res => execFile('xattr', ['-d', 'com.apple.quarantine', YT_DLP_PATH], () => res()));
+            console.log(`[Main] yt-dlp updated to ${latestVersion}`);
+        } else {
+            console.log('[Main] yt-dlp is up to date.');
+        }
+    } catch (e) {
+        console.warn('[Main] yt-dlp version check failed, continuing with existing binary:', e);
+    }
 };
 
 const setupFFmpeg = async () => {
-    console.log(`[Main] Checking ffmpeg at: ${FFMPEG_PATH}`);
+    console.log(`[Main] Checking ffmpeg at: ${FFMPEG_PATH} (want arch: ${FFMPEG_ARCH})`);
+
+    // Re-download if missing, corrupt, or built for the wrong architecture
+    // (older installs shipped x86_64-only builds that run under Rosetta on Apple Silicon)
+    const installedArch = fs.existsSync(FFMPEG_ARCH_MARKER) ? fs.readFileSync(FFMPEG_ARCH_MARKER, 'utf-8').trim() : null;
     if (fs.existsSync(FFMPEG_PATH)) {
-        // Simple check
         const stats = fs.statSync(FFMPEG_PATH);
-        if (stats.size > 10 * 1024 * 1024) {
+        if (stats.size > 10 * 1024 * 1024 && installedArch === FFMPEG_ARCH) {
             fs.chmodSync(FFMPEG_PATH, '755');
-            // Remove quarantine
             await new Promise<void>(res => execFile('xattr', ['-d', 'com.apple.quarantine', FFMPEG_PATH], () => res()));
             return;
         }
         fs.unlinkSync(FFMPEG_PATH);
     }
 
-    console.log('[Main] Downloading ffmpeg...');
-    const zipPath = path.join(APP_SUPPORT, 'ffmpeg.zip');
-    await downloadFile(FFMPEG_URL, zipPath);
-
-    console.log('[Main] Unzipping ffmpeg...');
-    // Use system unzip
-    await new Promise<void>((resolve, reject) => {
-        const child = spawn('unzip', ['-o', zipPath, '-d', APP_SUPPORT]);
-        child.on('close', (code) => {
-            if (code === 0) resolve();
-            else reject(new Error('Unzip failed'));
-        });
-    });
-
-    if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+    console.log(`[Main] Downloading ffmpeg (${FFMPEG_ARCH})...`);
+    await downloadFile(FFMPEG_URL, FFMPEG_PATH);
     fs.chmodSync(FFMPEG_PATH, '755');
+    await new Promise<void>(res => execFile('xattr', ['-d', 'com.apple.quarantine', FFMPEG_PATH], () => res()));
+    fs.writeFileSync(FFMPEG_ARCH_MARKER, FFMPEG_ARCH);
+    console.log('[Main] ffmpeg ready.');
 };
 
 let initPromise: Promise<void> | null = null;
@@ -119,7 +180,6 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.mjs'),
             nodeIntegration: false,
             contextIsolation: true,
-            webSecurity: false // sometimes helps with local resource loading but use with caution
         },
     });
 
@@ -138,18 +198,162 @@ function createWindow() {
     }
 }
 
-import log from 'electron-log';
-import { autoUpdater } from 'electron-updater';
-
 // --- AUTO UPDATER CONFIG ---
 log.transports.file.level = 'info';
 autoUpdater.logger = log;
 
+// --- SPOTIFY USER LOGIN (Authorization Code + PKCE) ---
+// Lets users log into their own Spotify account (access to private playlists)
+// instead of relying on the shared token proxy. No client secret needed.
+const TOKEN_SERVER = 'https://universal-music-downloader.onrender.com';
+const SPOTIFY_CALLBACK_PORT = 43725;
+const SPOTIFY_REDIRECT_URI = `http://127.0.0.1:${SPOTIFY_CALLBACK_PORT}/callback`;
+const SPOTIFY_SCOPES = 'playlist-read-private playlist-read-collaborative user-library-read playlist-modify-public playlist-modify-private';
+const SPOTIFY_AUTH_PATH = path.join(APP_SUPPORT, 'spotify-auth.json');
+
+let cachedClientId: string | null = null;
+const getSpotifyClientId = async (): Promise<string> => {
+    if (cachedClientId) return cachedClientId;
+    const res = await fetch(`${TOKEN_SERVER}/client-id`);
+    if (!res.ok) throw new Error(`client-id fetch failed: ${res.status}`);
+    const data = await res.json();
+    if (!data.client_id) throw new Error('Token server did not return a client_id');
+    cachedClientId = data.client_id as string;
+    return cachedClientId;
+};
+
+interface SpotifyAuth {
+    access_token: string;
+    refresh_token: string;
+    expires_at: number; // epoch ms
+}
+
+const readSpotifyAuth = (): SpotifyAuth | null => {
+    try {
+        if (fs.existsSync(SPOTIFY_AUTH_PATH)) {
+            return JSON.parse(fs.readFileSync(SPOTIFY_AUTH_PATH, 'utf-8'));
+        }
+    } catch (e) { console.warn('[Spotify] Failed to read auth file:', e); }
+    return null;
+};
+
+const writeSpotifyAuth = (auth: SpotifyAuth) => {
+    fs.writeFileSync(SPOTIFY_AUTH_PATH, JSON.stringify(auth));
+};
+
+const exchangeSpotifyToken = async (params: Record<string, string>): Promise<SpotifyAuth> => {
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(params).toString(),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.access_token) {
+        throw new Error(`Spotify token exchange failed: ${JSON.stringify(data)}`);
+    }
+    const existing = readSpotifyAuth();
+    const auth: SpotifyAuth = {
+        access_token: data.access_token,
+        // Refresh responses may omit refresh_token; keep the old one
+        refresh_token: data.refresh_token || existing?.refresh_token || '',
+        expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+    };
+    writeSpotifyAuth(auth);
+    return auth;
+};
+
+const spotifyLogin = (): Promise<{ success: boolean; error?: string }> => {
+    return new Promise(async (resolve) => {
+        let server: http.Server | null = null;
+        const finish = (result: { success: boolean; error?: string }) => {
+            if (server) { server.close(); server = null; }
+            resolve(result);
+        };
+
+        try {
+            const clientId = await getSpotifyClientId();
+            const verifier = crypto.randomBytes(64).toString('base64url');
+            const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+            const state = crypto.randomBytes(16).toString('hex');
+
+            server = http.createServer(async (req, res) => {
+                const reqUrl = new URL(req.url || '/', SPOTIFY_REDIRECT_URI);
+                if (reqUrl.pathname !== '/callback') { res.writeHead(404); res.end(); return; }
+
+                const code = reqUrl.searchParams.get('code');
+                const returnedState = reqUrl.searchParams.get('state');
+                const error = reqUrl.searchParams.get('error');
+
+                res.writeHead(200, { 'Content-Type': 'text/html' });
+                res.end('<html><body style="font-family:sans-serif;background:#000;color:#1DB954;display:flex;align-items:center;justify-content:center;height:100vh"><h1>' +
+                    (code ? '✅ Logged in! You can close this tab and return to LiberAudio.' : '❌ Login failed. You can close this tab.') +
+                    '</h1></body></html>');
+
+                if (error || !code || returnedState !== state) {
+                    finish({ success: false, error: error || 'Invalid callback' });
+                    return;
+                }
+
+                try {
+                    await exchangeSpotifyToken({
+                        grant_type: 'authorization_code',
+                        code,
+                        redirect_uri: SPOTIFY_REDIRECT_URI,
+                        client_id: clientId,
+                        code_verifier: verifier,
+                    });
+                    console.log('[Spotify] User logged in 🎉');
+                    finish({ success: true });
+                } catch (e: any) {
+                    finish({ success: false, error: e.message });
+                }
+            });
+
+            server.on('error', (e: any) => finish({ success: false, error: `Callback server error: ${e.message}` }));
+            server.listen(SPOTIFY_CALLBACK_PORT, '127.0.0.1', () => {
+                const authUrl = new URL('https://accounts.spotify.com/authorize');
+                authUrl.searchParams.set('client_id', clientId);
+                authUrl.searchParams.set('response_type', 'code');
+                authUrl.searchParams.set('redirect_uri', SPOTIFY_REDIRECT_URI);
+                authUrl.searchParams.set('code_challenge_method', 'S256');
+                authUrl.searchParams.set('code_challenge', challenge);
+                authUrl.searchParams.set('state', state);
+                authUrl.searchParams.set('scope', SPOTIFY_SCOPES);
+                shell.openExternal(authUrl.href);
+            });
+
+            // Give up after 5 minutes
+            setTimeout(() => finish({ success: false, error: 'Login timed out' }), 5 * 60 * 1000);
+        } catch (e: any) {
+            finish({ success: false, error: e.message });
+        }
+    });
+};
+
+const getSpotifyUserToken = async (): Promise<string | null> => {
+    const auth = readSpotifyAuth();
+    if (!auth) return null;
+    if (auth.expires_at > Date.now() + 60_000) return auth.access_token;
+    // Refresh
+    try {
+        const clientId = await getSpotifyClientId();
+        const refreshed = await exchangeSpotifyToken({
+            grant_type: 'refresh_token',
+            refresh_token: auth.refresh_token,
+            client_id: clientId,
+        });
+        return refreshed.access_token;
+    } catch (e) {
+        console.warn('[Spotify] Token refresh failed, user must re-login:', e);
+        return null;
+    }
+};
+
 app.whenReady().then(async () => {
     console.log(`[Main] App Ready. Node: ${process.version}, Arch: ${process.arch}, Platform: ${process.platform}`);
+    loadSearchCache();
     createWindow();
 
-    // Initialize YTMusic (Dynamic Import)
     // Initialize YTMusic (Dynamic Import)
     try {
         const mod = await import('ytmusic-api');
@@ -162,8 +366,6 @@ app.whenReady().then(async () => {
         console.error('[Main] Failed to init YTMusic:', e);
         // Do not block app, just log error. Handlers will fallback to Tier 2.
     }
-
-
 
     // Check for updates immediately
     console.log('[Main] Checking for updates...');
@@ -184,6 +386,35 @@ app.whenReady().then(async () => {
         return result.canceled ? null : result.filePaths[0];
     });
 
+    // --- SPOTIFY AUTH IPC ---
+    ipcMain.handle('spotify-login', () => spotifyLogin());
+    ipcMain.handle('spotify-get-token', () => getSpotifyUserToken());
+    ipcMain.handle('spotify-logout', () => {
+        try {
+            if (fs.existsSync(SPOTIFY_AUTH_PATH)) fs.unlinkSync(SPOTIFY_AUTH_PATH);
+            return { success: true };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    });
+
+    // --- LIBRARY SCANNER ---
+    // Returns audio file basenames (without extension) so the renderer can
+    // match "Artist - Title" against scanned playlists and mark them as owned.
+    ipcMain.handle('scan-library', async (_, folder: string) => {
+        try {
+            const AUDIO_EXTS = new Set(['.m4a', '.mp3', '.opus', '.flac', '.wav', '.aac', '.ogg']);
+            const files = fs.readdirSync(folder)
+                .filter(f => AUDIO_EXTS.has(path.extname(f).toLowerCase()))
+                .map(f => path.basename(f, path.extname(f)));
+            console.log(`[Main] Library scan found ${files.length} audio files in ${folder}`);
+            return { success: true, files };
+        } catch (e: any) {
+            console.error('[Main] Library scan failed:', e);
+            return { success: false, error: e.message };
+        }
+    });
+
     // --- GENERIC METADATA SCANNER (SC/YT) ---
     ipcMain.handle('fetch-metadata', async (_, url) => {
         if (initPromise) await initPromise;
@@ -198,6 +429,10 @@ app.whenReady().then(async () => {
             args.push(url);
 
             const child = spawn(YT_DLP_PATH, args);
+            child.on('error', (err) => {
+                console.error('[Main] Failed to spawn yt-dlp:', err);
+                resolve({ success: false, error: 'Downloader is not installed yet. Please wait a moment and try again.' });
+            });
 
             let stdout = '';
             let stderr = '';
@@ -223,20 +458,16 @@ app.whenReady().then(async () => {
                         entries = [data];
                     }
 
-                    if (entries.length > 0) {
-                        console.log('[Main] Sample Entry:', JSON.stringify(entries[0], null, 2));
-                    }
-
                     const tracks = entries.map((entry: any) => {
                         if (!entry) return null;
 
                         let title = entry.title || entry.fulltitle || entry.track || entry.alt_title;
                         let artist = entry.uploader || entry.artist || entry.creator || entry.channel || entry.uploader_id;
-                        const url = entry.url || entry.webpage_url || entry.original_url || url;
+                        const entryUrl = entry.url || entry.webpage_url || entry.original_url || url;
 
-                        if ((!title || !artist) && url.includes('soundcloud.com')) {
+                        if ((!title || !artist) && entryUrl.includes('soundcloud.com')) {
                             try {
-                                const parts = url.split('/').filter((p: string) => p.length > 0);
+                                const parts = entryUrl.split('/').filter((p: string) => p.length > 0);
                                 if (parts.length >= 2) {
                                     const slugTitle = parts[parts.length - 1];
                                     const slugArtist = parts[parts.length - 2];
@@ -254,7 +485,7 @@ app.whenReady().then(async () => {
                             id: entry.id || 'no-id',
                             title: title || 'Unknown Title',
                             artist: artist || 'Unknown Artist',
-                            url,
+                            url: entryUrl,
                             duration: entry.duration || 0
                         };
                     }).filter((t: any) => t !== null);
@@ -289,24 +520,6 @@ app.whenReady().then(async () => {
 
     const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-    const runYtDlp = (args: string[]): Promise<any[]> => {
-        return new Promise((resolve) => {
-            const child = spawn(YT_DLP_PATH, args);
-            let stdout = '';
-
-            child.stdout.on('data', d => stdout += d.toString());
-            child.on('close', () => {
-                try {
-                    const results = stdout.trim().split('\n')
-                        .filter(line => line.length > 0)
-                        .map(line => { try { return JSON.parse(line) } catch (e) { return null } })
-                        .filter(x => x !== null);
-                    resolve(results);
-                } catch (e) { resolve([]); }
-            });
-        });
-    };
-
     const searchYtDlp = (query: string, prefix: string = 'ytsearch5'): Promise<any[]> => {
         return new Promise((resolve) => {
             const args = [
@@ -316,6 +529,10 @@ app.whenReady().then(async () => {
                 `${prefix}:${query}`
             ];
             const child = spawn(YT_DLP_PATH, args);
+            child.on('error', (err) => {
+                console.error('[Main] Failed to spawn yt-dlp for search:', err);
+                resolve([]);
+            });
             let stdout = '';
             child.stdout.on('data', d => stdout += d.toString());
             child.on('close', () => {
@@ -327,9 +544,74 @@ app.whenReady().then(async () => {
         });
     };
 
+    // --- SHARED MATCH SCORING (used by all search tiers) ---
+    const NEGATIVE_KEYWORDS = ['cover', 'karaoke', 'instrumental', 'remix', 'live', 'concerto', 'mix'];
 
+    interface SearchCandidate {
+        id: string;
+        title: string;
+        artist: string;
+        isSong?: boolean;
+        duration?: number; // seconds
+        raw?: any;
+    }
 
-    // --- YTMusic SEARCH (Exact Implementation of User Request) ---
+    const pickBestMatch = (
+        candidates: SearchCandidate[],
+        targetTitle: string,
+        targetArtist: string,
+        targetDuration: number | undefined,
+        tier: string
+    ): SearchCandidate | null => {
+        const cleanTitle = normalizeStr(targetTitle);
+        const cleanArtist = normalizeStr(targetArtist);
+        const targetLower = (targetTitle + ' ' + targetArtist).toLowerCase();
+
+        let bestMatch: SearchCandidate | null = null;
+        let highestScore = -1;
+
+        for (const c of candidates) {
+            const rTitle = normalizeStr(c.title || '');
+            const rArtist = normalizeStr(c.artist || '');
+            console.log(`[${tier}] Scoring: "${c.title}" by "${c.artist}"`);
+
+            const fullTitleLower = (c.title || '').toLowerCase();
+            const rejectedKw = NEGATIVE_KEYWORDS.find(kw => fullTitleLower.includes(kw) && !targetLower.includes(kw));
+            if (rejectedKw) {
+                console.log(`[${tier}] -> Reject: Negative Filter ("${rejectedKw}")`);
+                continue;
+            }
+
+            let score = 0;
+            if (rTitle.includes(cleanTitle) || cleanTitle.includes(rTitle)) score += 3;
+
+            if (rArtist.includes(cleanArtist) || cleanArtist.includes(rArtist)) score += 3;
+            else if (rTitle.includes(cleanArtist)) score += 2;
+
+            if (c.isSong) score += 1;
+
+            // Duration verification: strong signal for picking the right upload
+            if (targetDuration && c.duration) {
+                const diff = Math.abs(c.duration - targetDuration);
+                if (diff <= 3) score += 2;
+                else if (diff > 20) score -= 2;
+            }
+
+            console.log(`[${tier}] -> Score: ${score}`);
+
+            if (score > highestScore && score >= 5) {
+                highestScore = score;
+                bestMatch = c;
+            }
+        }
+
+        if (bestMatch) {
+            console.log(`[${tier}] 🏆 Winner: "${bestMatch.title}" (Score: ${highestScore})`);
+        }
+        return bestMatch;
+    };
+
+    // --- TIERED YOUTUBE SEARCH ---
     ipcMain.handle('search-youtube', async (_, payload) => {
         // Try init if not ready, but don't hard fail if it breaks
         if (!isYtMusicReady || !ytmusic) {
@@ -349,6 +631,7 @@ app.whenReady().then(async () => {
 
         let targetArtist = '';
         let targetTitle = '';
+        let targetDuration: number | undefined;
         if (typeof payload === 'string') {
             const parts = payload.split(' - ');
             if (parts.length > 1) {
@@ -360,10 +643,9 @@ app.whenReady().then(async () => {
         } else {
             targetArtist = payload.artist || '';
             targetTitle = payload.title || '';
+            targetDuration = payload.duration;
         }
 
-        const cleanArtist = normalizeStr(targetArtist);
-        const cleanTitle = normalizeStr(targetTitle);
         const query = `${targetArtist} - ${targetTitle}`;
         const cacheKey = normalizeStr(query);
 
@@ -381,7 +663,7 @@ app.whenReady().then(async () => {
         }
         lastSearchTime = Date.now();
 
-        // --- TIER 1: YouTube Music ---
+        // --- TIER 1: YouTube Music (in-process API) ---
         if (isYtMusicReady && ytmusic) {
             console.log('[Tier 1] Searching YTMusic...');
             let retries = 0;
@@ -389,56 +671,20 @@ app.whenReady().then(async () => {
             while (retries <= maxRetries) {
                 try {
                     const results = await ytmusic.search(query);
-                    let bestMatch: any = null;
-                    let highestScore = -1;
+                    const candidates: SearchCandidate[] = results.slice(0, 5)
+                        .filter((r: any) => ['SONG', 'song', 'VIDEO', 'video'].includes(r.type))
+                        .map((r: any) => ({
+                            id: r.videoId,
+                            title: r.name || '',
+                            artist: r.artist?.name || '',
+                            isSong: r.type === 'SONG' || r.type === 'song',
+                            duration: r.duration || undefined,
+                        }));
 
-                    for (const r of results.slice(0, 5)) {
-                        if (r.type !== 'SONG' && r.type !== 'song' && r.type !== 'VIDEO' && r.type !== 'video') continue;
-
-                        const rTitle = normalizeStr(r.name || '');
-                        const rArtist = normalizeStr(r.artist?.name || '');
-
-                        console.log(`[Tier 1] Scoring: "${r.name}" by "${r.artist?.name}"`);
-
-                        const fullTitleLower = (r.name || '').toLowerCase();
-                        const targetLower = (targetTitle + ' ' + targetArtist).toLowerCase();
-                        const negativeKeywords = ['cover', 'karaoke', 'instrumental', 'remix', 'live', 'concerto', 'mix'];
-                        let isRejected = false;
-                        let rejectionReason = '';
-
-                        for (const kw of negativeKeywords) {
-                            if (fullTitleLower.includes(kw) && !targetLower.includes(kw)) {
-                                isRejected = true;
-                                rejectionReason = kw;
-                                break;
-                            }
-                        }
-                        if (isRejected) {
-                            console.log(`[Tier 1] -> Reject: Negative Filter ("${rejectionReason}")`);
-                            continue;
-                        }
-
-                        let score = 0;
-                        if (rTitle.includes(cleanTitle) || cleanTitle.includes(rTitle)) score += 3;
-                        else if (rTitle.includes(cleanTitle) && rTitle.includes(cleanArtist)) score += 3;
-
-                        if (rArtist.includes(cleanArtist) || cleanArtist.includes(rArtist)) score += 3;
-                        else if (rTitle.includes(cleanArtist)) score += 2;
-
-                        if (r.type === 'SONG' || r.type === 'song') score += 1;
-
-                        console.log(`[Tier 1] -> Score: ${score}`);
-
-                        if (score > highestScore && score >= 5) {
-                            highestScore = score;
-                            bestMatch = r;
-                        }
-                    }
-
-                    if (bestMatch) {
-                        const url = `https://music.youtube.com/watch?v=${bestMatch.videoId}`;
-                        console.log(`[Tier 1] 🏆 Winner: "${bestMatch.name}" (Score: ${highestScore}) -> ${url}`);
-                        searchCache.set(cacheKey, url);
+                    const best = pickBestMatch(candidates, targetTitle, targetArtist, targetDuration, 'Tier 1');
+                    if (best) {
+                        const url = `https://music.youtube.com/watch?v=${best.id}`;
+                        cacheSearchResult(cacheKey, url);
                         return url;
                     }
 
@@ -460,130 +706,54 @@ app.whenReady().then(async () => {
             console.warn('[Tier 1] Skipped (YTMusic not ready).');
         }
 
-        // --- TIER 2: YouTubei.js (Normal YouTube) ---
-        // --- TIER 2: yt-dlp (YouTube Music Mode) ---
-        console.log(`[Main] Falling back to Tier 2: yt-dlp (YouTube Music)...`);
-        try {
-            // 'ytmsearch' searches YouTube Music specifically
-            const fallbackResults = await searchYtDlp(query, 'ytmsearch5');
-            let bestFallMatch: any = null;
-            let highestFallScore = -1;
+        // --- TIER 2 & 3: yt-dlp (YouTube Music, then normal YouTube) ---
+        for (const [tier, prefix] of [['Tier 2', 'ytmsearch5'], ['Tier 3', 'ytsearch5']] as const) {
+            console.log(`[Main] Falling back to ${tier}: yt-dlp (${prefix})...`);
+            try {
+                const results = await searchYtDlp(query, prefix);
+                const candidates: SearchCandidate[] = results.map((r: any) => ({
+                    id: r.id,
+                    title: r.title || '',
+                    artist: r.uploader || '',
+                    duration: r.duration || undefined,
+                }));
 
-            for (const r of fallbackResults) {
-                const rTitle = normalizeStr(r.title || '');
-                const rArtist = normalizeStr(r.uploader || '');
-                console.log(`[Tier 2] Scoring: "${r.title}" by "${r.uploader}"`);
-
-                const fullTitleLower = (r.title || '').toLowerCase();
-                const targetLower = (targetTitle + ' ' + targetArtist).toLowerCase();
-                const negativeKeywords = ['cover', 'karaoke', 'instrumental', 'remix', 'live', 'concerto', 'mix'];
-                let isRejected = false;
-
-                for (const kw of negativeKeywords) {
-                    if (fullTitleLower.includes(kw) && !targetLower.includes(kw)) {
-                        isRejected = true;
-                        break;
-                    }
+                const best = pickBestMatch(candidates, targetTitle, targetArtist, targetDuration, tier);
+                if (best) {
+                    const url = `https://youtube.com/watch?v=${best.id}`;
+                    cacheSearchResult(cacheKey, url);
+                    return url;
                 }
-                if (isRejected) {
-                    console.log(`[Tier 2] -> Reject: Negative Filter`);
-                    continue;
-                }
-
-                let score = 0;
-                if (rTitle.includes(cleanTitle) || cleanTitle.includes(rTitle)) score += 3;
-                else if (rTitle.includes(cleanTitle) && rTitle.includes(cleanArtist)) score += 3;
-
-                if (rArtist.includes(cleanArtist) || cleanArtist.includes(rArtist)) score += 3;
-                else if (rTitle.includes(cleanArtist)) score += 2;
-
-                console.log(`[Tier 2] -> Score: ${score}`);
-
-                if (score > highestFallScore && score >= 5) {
-                    highestFallScore = score;
-                    bestFallMatch = r;
-                }
+            } catch (e) {
+                console.error(`[${tier}] Error:`, e);
             }
-
-            if (bestFallMatch) {
-                const url = `https://youtube.com/watch?v=${bestFallMatch.id}`;
-                console.log(`[Tier 2] 🏆 Winner: "${bestFallMatch.title}" (Score: ${highestFallScore}) -> ${url}`);
-                searchCache.set(cacheKey, url);
-                return url;
-            }
-
-        } catch (e) { console.error('[Tier 2] Error:', e); }
-
-        // --- TIER 3: yt-dlp (Normal YouTube Mode) ---
-        console.log(`[Main] Falling back to Tier 3: yt-dlp (Normal YouTube)...`);
-        try {
-            // 'ytsearch' searches Standard YouTube
-            const fallbackResults = await searchYtDlp(query, 'ytsearch5');
-            let bestFallMatch: any = null;
-            let highestFallScore = -1;
-
-            for (const r of fallbackResults) {
-                const rTitle = normalizeStr(r.title || '');
-                const rArtist = normalizeStr(r.uploader || '');
-                console.log(`[Tier 3] Scoring: "${r.title}" by "${r.uploader}"`);
-
-                const fullTitleLower = (r.title || '').toLowerCase();
-                const targetLower = (targetTitle + ' ' + targetArtist).toLowerCase();
-                const negativeKeywords = ['cover', 'karaoke', 'instrumental', 'remix', 'live', 'concerto', 'mix'];
-                let isRejected = false;
-
-                for (const kw of negativeKeywords) {
-                    if (fullTitleLower.includes(kw) && !targetLower.includes(kw)) {
-                        isRejected = true;
-                        break;
-                    }
-                }
-                if (isRejected) {
-                    console.log(`[Tier 3] -> Reject: Negative Filter`);
-                    continue;
-                }
-
-                let score = 0;
-                if (rTitle.includes(cleanTitle) || cleanTitle.includes(rTitle)) score += 3;
-                else if (rTitle.includes(cleanTitle) && rTitle.includes(cleanArtist)) score += 3;
-
-                if (rArtist.includes(cleanArtist) || cleanArtist.includes(rArtist)) score += 3;
-                else if (rTitle.includes(cleanArtist)) score += 2;
-
-                console.log(`[Tier 3] -> Score: ${score}`);
-
-                if (score > highestFallScore && score >= 5) {
-                    highestFallScore = score;
-                    bestFallMatch = r;
-                }
-            }
-
-            if (bestFallMatch) {
-                const url = `https://youtube.com/watch?v=${bestFallMatch.id}`;
-                console.log(`[Tier 3] 🏆 Winner: "${bestFallMatch.title}" (Score: ${highestFallScore}) -> ${url}`);
-                searchCache.set(cacheKey, url);
-                return url;
-            }
-
-        } catch (e) {
-            console.error('[Tier 3] Error:', e);
         }
 
         return null; // Give up
     });
 
-    ipcMain.handle('download-song', async (event, { url, folder, artist, title }) => {
+    // Strip characters that are illegal in filenames (or would change the path)
+    const sanitizeFilename = (s: string): string => {
+        return s.replace(/[\/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim() || 'Unknown';
+    };
+
+    ipcMain.handle('download-song', async (_event, { url, folder, artist, title }) => {
         // Ensure dependencies are ready before starting download
         if (initPromise) await initPromise;
 
         return new Promise((resolve) => {
-            const outputTemplate = path.join(folder, `${artist} - ${title}.%(ext)s`);
-            const safeTitle = title.replace(/"/g, '');
-            const safeArtist = artist.replace(/"/g, '');
+            const safeTitle = sanitizeFilename(title);
+            const safeArtist = sanitizeFilename(artist);
+            const outputTemplate = path.join(folder, `${safeArtist} - ${safeTitle}.%(ext)s`);
 
             const args = [
                 '--ffmpeg-location', FFMPEG_PATH, // <--- CRITICAL: Use the bundled binary
-                '-x', '--audio-format', 'm4a', '--embed-metadata', '--embed-thumbnail',
+                // Prefer native m4a (AAC): yt-dlp stream-copies instead of re-encoding,
+                // which makes the post-processing step near-instant for YouTube sources.
+                '-f', 'bestaudio[ext=m4a]/bestaudio',
+                '-x', '--audio-format', 'm4a',
+                '--concurrent-fragments', '4', // parallel fragment download
+                '--embed-metadata', '--embed-thumbnail',
                 '--convert-thumbnails', 'jpg',
                 '--postprocessor-args', 'ThumbnailsConvertor+ffmpeg:-vf crop=ih:ih',
                 '--no-warnings',
@@ -593,11 +763,17 @@ app.whenReady().then(async () => {
             ];
 
             const child = spawn(YT_DLP_PATH, args);
+            child.on('error', (err) => {
+                console.error('[Main] Failed to spawn yt-dlp for download:', err);
+                resolve({ success: false, error: 'Downloader is not installed yet. Please wait a moment and try again.' });
+            });
             child.stdout.on('data', (d) => process.stdout.write(d));
+            let stderrOutput = '';
+            child.stderr.on('data', (d) => { stderrOutput += d.toString(); process.stderr.write(d); });
 
             child.on('close', (code) => {
                 if (code === 0) resolve({ success: true });
-                else resolve({ success: false, error: `Exit code ${code}` });
+                else resolve({ success: false, error: stderrOutput || `Exit code ${code}` });
             });
         });
     });
@@ -626,7 +802,7 @@ autoUpdater.on('download-progress', (progressObj) => {
     log_message = log_message + ' (' + progressObj.transferred + "/" + progressObj.total + ')';
     log.info(log_message);
 });
-autoUpdater.on('update-downloaded', (info) => {
+autoUpdater.on('update-downloaded', () => {
     log.info('Update downloaded');
     dialog.showMessageBox({
         type: 'info',

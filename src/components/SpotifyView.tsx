@@ -1,8 +1,9 @@
 import axios from 'axios';
-import { AlertCircle, Check, ChevronLeft, Coffee, DownloadCloud, FolderOpen, Loader2, Search, Square } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { AlertCircle, Check, ChevronLeft, Coffee, DownloadCloud, FolderOpen, FolderSync, Loader2, LogIn, LogOut, Search, Square } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import Logo from '../assets/spotify-logo.png'; // Re-use logo (make sure it looks good on dark)
 import { HistoryManager } from '../utils/historyManager';
+import { DOWNLOAD_CONCURRENCY, normalizeForMatch } from '../utils/matching';
 
 interface Song {
     id: string;
@@ -29,11 +30,42 @@ export function SpotifyView({ onBack }: Props) {
     const [statusMsg, setStatusMsg] = useState('Ready');
     const [targetFolder, setTargetFolder] = useState<string | null>(localStorage.getItem('target_folder'));
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
     const abortRef = useRef(false);
 
+    // Check if the user already has a Spotify session
+    useEffect(() => {
+        window.electronAPI.spotifyGetToken?.().then(t => setIsLoggedIn(!!t)).catch(() => { });
+    }, []);
+
+    const handleLogin = async () => {
+        setStatusMsg('Complete the login in your browser...');
+        const res = await window.electronAPI.spotifyLogin();
+        if (res.success) {
+            setIsLoggedIn(true);
+            setStatusMsg('Logged in — private playlists unlocked!');
+        } else {
+            setStatusMsg(res.error || 'Login failed');
+        }
+    };
+
+    const handleLogout = async () => {
+        await window.electronAPI.spotifyLogout();
+        setIsLoggedIn(false);
+        setStatusMsg('Logged out');
+    };
+
     const getSpotifyToken = async () => {
+        // Prefer the user's own session (works for private playlists, no backend wait)
         try {
-            // Fetch from your Render Backend with 4 min timeout
+            const userToken = await window.electronAPI.spotifyGetToken();
+            if (userToken) return userToken;
+        } catch (e) {
+            console.warn('User token unavailable, falling back to shared backend', e);
+        }
+
+        try {
+            // Fallback: shared Render backend with 4 min timeout
             const res = await axios.get('https://universal-music-downloader.onrender.com/token', { timeout: 240000 });
             return res.data.access_token;
         } catch (e) {
@@ -69,53 +101,62 @@ export function SpotifyView({ onBack }: Props) {
         let id = '';
         const isTrack = playlistUrl.includes('/track/');
         const isPlaylist = playlistUrl.includes('/playlist/');
+        const isAlbum = playlistUrl.includes('/album/');
 
         if (isTrack) {
             id = playlistUrl.split('/track/')[1]?.split('?')[0];
         } else if (isPlaylist) {
             id = playlistUrl.split('/playlist/')[1]?.split('?')[0];
+        } else if (isAlbum) {
+            id = playlistUrl.split('/album/')[1]?.split('?')[0];
         }
 
         if (!id) {
-            setStatusMsg('Invalid URL');
+            setStatusMsg('Invalid URL — paste a Track, Playlist or Album link');
+            setIsLoading(false);
             return;
         }
 
+        const toSong = (track: any, extraArtist?: string): Song => {
+            const isDownloaded = HistoryManager.has(track.id);
+            return {
+                id: track.id,
+                title: track.name,
+                artist: track.artists?.map((a: any) => a.name).join(', ') || extraArtist || 'Unknown Artist',
+                status: isDownloaded ? 'exists' : 'pending',
+                isSelected: !isDownloaded,
+                isPreviouslyDownloaded: isDownloaded,
+                durationMs: track.duration_ms
+            };
+        };
+
         try {
             let allSongs: Song[] = [];
+            const headers = { 'Authorization': `Bearer ${token}` };
 
             if (isTrack) {
                 // Single Track
-                const res = await axios.get(`https://api.spotify.com/v1/tracks/${id}`, { headers: { 'Authorization': `Bearer ${token}` } });
-                const item = res.data;
-                const isDownloaded = HistoryManager.has(item.id);
-                allSongs = [{
-                    id: item.id,
-                    title: item.name,
-                    artist: item.artists.map((a: any) => a.name).join(', '),
-                    status: isDownloaded ? 'exists' : 'pending',
-                    isSelected: !isDownloaded,
-                    isPreviouslyDownloaded: isDownloaded,
-                    durationMs: item.duration_ms
-                }];
+                const res = await axios.get(`https://api.spotify.com/v1/tracks/${id}`, { headers });
+                allSongs = [toSong(res.data)];
+            } else if (isAlbum) {
+                // Album (track objects come without the item.track wrapper)
+                let nextUrl = `https://api.spotify.com/v1/albums/${id}/tracks?limit=50`;
+                while (nextUrl) {
+                    const res = await axios.get(nextUrl, { headers });
+                    const newItems = res.data.items
+                        .filter((t: any) => t && t.id) // skip unavailable tracks
+                        .map((t: any) => toSong(t));
+                    allSongs = [...allSongs, ...newItems];
+                    nextUrl = res.data.next;
+                }
             } else {
                 // Playlist
                 let nextUrl = `https://api.spotify.com/v1/playlists/${id}/tracks`;
                 while (nextUrl) {
-                    const res = await axios.get(nextUrl, { headers: { 'Authorization': `Bearer ${token}` } });
-                    const newItems = res.data.items.map((item: any) => {
-                        const trackId = item.track.id;
-                        const isDownloaded = HistoryManager.has(trackId);
-                        return {
-                            id: trackId,
-                            title: item.track.name,
-                            artist: item.track.artists.map((a: any) => a.name).join(', '),
-                            status: (isDownloaded ? 'exists' : 'pending') as 'pending' | 'downloading' | 'downloaded' | 'error' | 'exists',
-                            isSelected: !isDownloaded,
-                            isPreviouslyDownloaded: isDownloaded,
-                            durationMs: item.track.duration_ms
-                        };
-                    });
+                    const res = await axios.get(nextUrl, { headers });
+                    const newItems = res.data.items
+                        .filter((item: any) => item?.track?.id) // removed/local tracks have track === null
+                        .map((item: any) => toSong(item.track));
                     allSongs = [...allSongs, ...newItems];
                     nextUrl = res.data.next;
                 }
@@ -139,6 +180,9 @@ export function SpotifyView({ onBack }: Props) {
         }
     };
 
+    // Pipelined queue: one producer resolves YouTube URLs sequentially (the main
+    // process rate-limits searches anyway) while a pool of workers downloads in
+    // parallel. Searching song N+1 overlaps with downloading song N.
     const startProcess = async () => {
         if (!targetFolder) {
             alert('Please select a download folder first.');
@@ -150,43 +194,66 @@ export function SpotifyView({ onBack }: Props) {
         setStatusMsg('Starting Download Queue...');
 
         const newSongs = [...songs];
+        const queue = newSongs.map((_, i) => i).filter(i => newSongs[i].isSelected);
+        const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-        for (let i = 0; i < newSongs.length; i++) {
-            if (abortRef.current) break;
+        const setStatus = (i: number, status: Song['status']) => {
+            newSongs[i] = { ...newSongs[i], status };
+            setSongs([...newSongs]);
+        };
 
-            if (newSongs[i].isSelected) {
-                if (!newSongs[i].youtubeUrl) {
-                    newSongs[i].status = 'searching';
-                    setSongs([...newSongs]);
+        // undefined = not searched yet, null = not found, string = ready to download
+        const resolved: Record<number, string | null> = {};
 
-                    const url = await window.electronAPI.searchYoutube({
-                        artist: newSongs[i].artist,
-                        title: newSongs[i].title,
-                        duration: newSongs[i].durationMs ? Math.round(newSongs[i].durationMs! / 1000) : undefined
-                    });
-
-                    if (!url) {
-                        newSongs[i].status = 'notFound';
-                        setSongs([...newSongs]);
-                        continue;
-                    }
-                    newSongs[i].youtubeUrl = url;
-                    newSongs[i].status = 'found';
-                    setSongs([...newSongs]);
+        // Producer: resolve YouTube URLs ahead of the downloaders
+        const searcher = (async () => {
+            for (const i of queue) {
+                if (abortRef.current) break;
+                if (newSongs[i].youtubeUrl) {
+                    resolved[i] = newSongs[i].youtubeUrl!;
+                    continue;
                 }
+                setStatus(i, 'searching');
+                const url = await window.electronAPI.searchYoutube({
+                    artist: newSongs[i].artist,
+                    title: newSongs[i].title,
+                    duration: newSongs[i].durationMs ? Math.round(newSongs[i].durationMs! / 1000) : undefined
+                });
+                resolved[i] = url;
+                if (url) {
+                    newSongs[i] = { ...newSongs[i], youtubeUrl: url };
+                    setStatus(i, 'found');
+                } else {
+                    setStatus(i, 'notFound');
+                }
+            }
+        })();
 
-                newSongs[i].status = 'downloading';
-                setSongs([...newSongs]);
+        // Consumers: parallel download workers pulling from a shared cursor
+        let cursor = 0;
+        const worker = async () => {
+            while (!abortRef.current) {
+                const qIdx = cursor++;
+                if (qIdx >= queue.length) break;
+                const i = queue[qIdx];
 
+                // Wait for the searcher to resolve this song
+                while (resolved[i] === undefined && !abortRef.current) await sleep(150);
+                if (abortRef.current) break;
+
+                const url = resolved[i];
+                if (!url) continue; // search came up empty
+
+                setStatus(i, 'downloading');
                 const res = await window.electronAPI.downloadSong({
-                    url: newSongs[i].youtubeUrl!,
+                    url,
                     folder: targetFolder,
                     artist: newSongs[i].artist,
                     title: newSongs[i].title
                 });
 
                 if (res.success) {
-                    newSongs[i].status = 'downloaded';
+                    setStatus(i, 'downloaded');
                     HistoryManager.add({
                         id: newSongs[i].id,
                         source: 'spotify',
@@ -195,15 +262,55 @@ export function SpotifyView({ onBack }: Props) {
                         timestamp: Date.now()
                     });
                 } else {
-                    newSongs[i].status = 'error';
+                    setStatus(i, 'error');
                 }
-                setSongs([...newSongs]);
-                if (!abortRef.current) await new Promise(r => setTimeout(r, 1500));
             }
-        }
+        };
+
+        await Promise.all([searcher, ...Array.from({ length: DOWNLOAD_CONCURRENCY }, () => worker())]);
 
         setIsProcessing(false);
         setStatusMsg(abortRef.current ? 'Stopped' : 'All Done');
+    };
+
+    // Scan the target folder for already-downloaded files ("Artist - Title.m4a")
+    // and mark matching tracks so they won't be re-downloaded.
+    const syncFolder = async () => {
+        if (!targetFolder) {
+            alert('Please select a download folder first.');
+            return;
+        }
+        if (songs.length === 0) {
+            setStatusMsg('Scan a playlist first, then sync');
+            return;
+        }
+
+        setStatusMsg('Scanning folder...');
+        const res = await window.electronAPI.scanLibrary(targetFolder);
+        if (!res.success || !res.files) {
+            setStatusMsg(res.error || 'Folder scan failed');
+            return;
+        }
+
+        const fileSet = new Set(res.files.map(normalizeForMatch));
+        let matched = 0;
+        const newSongs = songs.map(s => {
+            if (s.status === 'downloaded' || s.status === 'exists') return s;
+            if (fileSet.has(normalizeForMatch(`${s.artist} - ${s.title}`))) {
+                matched++;
+                HistoryManager.add({
+                    id: s.id,
+                    source: 'spotify',
+                    title: s.title,
+                    artist: s.artist,
+                    timestamp: Date.now()
+                });
+                return { ...s, status: 'exists' as const, isSelected: false, isPreviouslyDownloaded: true };
+            }
+            return s;
+        });
+        setSongs(newSongs);
+        setStatusMsg(matched > 0 ? `Synced: found ${matched} track(s) already in your folder` : 'No matching files found in folder');
     };
 
     const stopProcess = () => {
@@ -267,10 +374,33 @@ export function SpotifyView({ onBack }: Props) {
 
                 {/* Sidebar */}
                 <div className="col-span-1 space-y-6">
-                    {/* Credentials Box REMOVED */}
-                    {/* <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)] relative overflow-hidden">
-                        ...
-                    </div> */}
+                    {/* Account Box */}
+                    <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                        <h2 className="text-xs font-black text-[#1DB954] uppercase mb-4 tracking-widest">Account</h2>
+                        {isLoggedIn ? (
+                            <div className="flex items-center gap-2">
+                                <span className="flex-1 text-xs font-bold text-[#1DB954] bg-[#1DB954]/10 border border-[#1DB954]/30 rounded-xl py-3 px-4 uppercase tracking-wide">
+                                    ✓ Logged In · Private Playlists OK
+                                </span>
+                                <button onClick={handleLogout} title="Log out" className="p-3 rounded-xl bg-black/40 border border-white/10 text-[#1DB954]/60 hover:text-[#1DB954] transition-colors">
+                                    <LogOut size={18} />
+                                </button>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={handleLogin}
+                                className="w-full bg-black/40 hover:bg-[#1DB954]/10 border border-[#1DB954]/50 text-[#1DB954] py-3 rounded-xl flex items-center justify-center text-sm transition-colors font-bold uppercase tracking-wide"
+                            >
+                                <LogIn size={18} className="mr-2" />
+                                Login with Spotify
+                            </button>
+                        )}
+                        {!isLoggedIn && (
+                            <p className="text-[10px] text-[#1DB954]/40 mt-3 leading-relaxed">
+                                Optional — unlocks your private playlists and skips the backend wait.
+                            </p>
+                        )}
+                    </div>
 
                     {/* Input Box */}
                     <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)]">
@@ -294,6 +424,15 @@ export function SpotifyView({ onBack }: Props) {
                         <button onClick={selectFolder} className="w-full mb-4 bg-black/40 hover:bg-black/60 border border-white/10 text-[#1DB954] py-3 rounded-xl flex items-center justify-center text-sm transition-colors font-bold uppercase tracking-wide">
                             <FolderOpen size={18} className="mr-2" />
                             {targetFolder ? 'Folder Selected' : 'Choose Output'}
+                        </button>
+
+                        <button
+                            onClick={syncFolder}
+                            title="Scan your folder for songs you already have and mark them as done"
+                            className="w-full mb-4 bg-black/40 hover:bg-black/60 border border-white/10 text-[#1DB954]/80 hover:text-[#1DB954] py-3 rounded-xl flex items-center justify-center text-sm transition-colors font-bold uppercase tracking-wide"
+                        >
+                            <FolderSync size={18} className="mr-2" />
+                            Sync Folder
                         </button>
 
                         <div className="flex gap-2">

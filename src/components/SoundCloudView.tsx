@@ -2,6 +2,7 @@ import { Check, ChevronLeft, DownloadCloud, FolderOpen, Loader2, Search, Square 
 import { useRef, useState } from 'react';
 import Logo from '../assets/soundcloud-logo.png';
 import { HistoryManager } from '../utils/historyManager';
+import { DOWNLOAD_CONCURRENCY } from '../utils/matching';
 
 interface Song {
     id: string;
@@ -75,6 +76,7 @@ export function SoundCloudView({ onBack }: Props) {
         }
     };
 
+    // Parallel download pool: several yt-dlp processes at once
     const startProcess = async () => {
         if (!targetFolder) { alert('Select folder first'); return; }
 
@@ -83,14 +85,21 @@ export function SoundCloudView({ onBack }: Props) {
         setStatusMsg('Downloading...');
 
         const newSongs = [...songs];
+        const queue = newSongs.map((_, i) => i).filter(i => newSongs[i].isSelected);
 
-        for (let i = 0; i < newSongs.length; i++) {
-            if (abortRef.current) break;
+        const setStatus = (i: number, status: Song['status']) => {
+            newSongs[i] = { ...newSongs[i], status };
+            setSongs([...newSongs]);
+        };
 
-            if (newSongs[i].isSelected) {
-                newSongs[i].status = 'downloading';
-                setSongs([...newSongs]);
+        let cursor = 0;
+        const worker = async () => {
+            while (!abortRef.current) {
+                const qIdx = cursor++;
+                if (qIdx >= queue.length) break;
+                const i = queue[qIdx];
 
+                setStatus(i, 'downloading');
                 // Direct download using the specialized download-song (it handles any URL supported by yt-dlp)
                 const res = await window.electronAPI.downloadSong({
                     url: newSongs[i].url, // Direct SC URL
@@ -100,7 +109,7 @@ export function SoundCloudView({ onBack }: Props) {
                 });
 
                 if (res.success) {
-                    newSongs[i].status = 'downloaded';
+                    setStatus(i, 'downloaded');
                     HistoryManager.add({
                         id: newSongs[i].id,
                         source: 'soundcloud',
@@ -109,14 +118,15 @@ export function SoundCloudView({ onBack }: Props) {
                         timestamp: Date.now()
                     });
                 } else {
-                    newSongs[i].status = 'error';
+                    setStatus(i, 'error');
                 }
-                setSongs([...newSongs]);
             }
-        }
+        };
+
+        await Promise.all(Array.from({ length: DOWNLOAD_CONCURRENCY }, () => worker()));
 
         setIsProcessing(false);
-        setStatusMsg('All Done');
+        setStatusMsg(abortRef.current ? 'Stopped' : 'All Done');
     };
 
     const toggleSelect = (idx: number) => {
