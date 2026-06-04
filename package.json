@@ -12,7 +12,7 @@
   "description": "Download Music from Spotify, SoundCloud, and YouTube",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "build": "set -a; [ -f .env ] && . ./.env; set +a; tsc && vite build && electron-builder",
     "checksum": "node scripts/generate_checksum.js",
     "preview": "vite preview"
   },
@@ -64,6 +64,8 @@
           "arm64"
         ]
       },
+      "identity": null,
+      "gatekeeperAssess": false,
       "category": "public.app-category.music",
       "icon": "src/assets/main-logo.png",
       "artifactName": "${productName}-v${version}-macOS-${arch}.${ext}"
@@ -80,6 +82,12 @@
           "y": 220,
           "type": "link",
           "path": "/Applications"
+        },
+        {
+          "x": 130,
+          "y": 340,
+          "type": "file",
+          "path": "build/Fix LiberAudio.command"
         }
       ]
     },

@@ -1,1 +1,0 @@
-"use strict";const e=require("electron");e.contextBridge.exposeInMainWorld("electronAPI",{initDependencies:()=>e.ipcRenderer.invoke("init-dependencies"),selectFolder:()=>e.ipcRenderer.invoke("select-folder"),searchYoutube:n=>e.ipcRenderer.invoke("search-youtube",n),fetchMetadata:n=>e.ipcRenderer.invoke("fetch-metadata",n),downloadSong:n=>e.ipcRenderer.invoke("download-song",n)});

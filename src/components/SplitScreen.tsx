@@ -13,7 +13,6 @@ interface Props {
 export function SplitScreen({ onSelectService, serverConfig }: Props) {
     const [showOnboarding, setShowOnboarding] = useState(false);
     const [showToast, setShowToast] = useState(false);
-
     useEffect(() => {
         if (serverConfig?.toast && serverConfig.toast.text !== 'None') {
             setShowToast(true);
