@@ -34,7 +34,7 @@ The biggest update yet: massively faster downloads, login with your own Spotify 
 - Numerous stability fixes (startup races, crash on missing downloader, stuck loading states).
 
 ---
-**First time opening the app?** macOS will warn about an unidentified developer — see the quick fix on our [download page](https://wirthzig.github.io/LiberAudio/#gatekeeper).
+**First time opening the app?** macOS will warn about an unidentified developer — see the quick fix on our [download page](https://wirthzig.github.io/liber-audio/#gatekeeper).
 
 ---
 **Download below** — pick the file matching your Mac:
