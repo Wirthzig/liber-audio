@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LiberAudio — Free Your Music</title>
+    <meta name="description" content="LiberAudio: download music from Spotify, SoundCloud and YouTube playlists on macOS. Free, open source, auto-updating." />
+    <link rel="icon" type="image/png" href="assets/main-logo.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+
+        /* Animated aurora background */
+        .aurora {
+            position: fixed; inset: 0; z-index: -2; overflow: hidden; background: #050505;
+        }
+        .blob {
+            position: absolute; border-radius: 9999px; filter: blur(120px); opacity: .35;
+            animation: drift 24s ease-in-out infinite alternate;
+        }
+        .blob.green  { width: 45vw; height: 45vw; background: #1DB954; top: -10%; left: -10%; }
+        .blob.orange { width: 40vw; height: 40vw; background: #ff5500; bottom: -15%; right: -5%; animation-delay: -8s; }
+        .blob.red    { width: 35vw; height: 35vw; background: #ff0000; top: 40%; left: 55%; animation-delay: -16s; }
+        @keyframes drift {
+            0%   { transform: translate(0, 0) scale(1); }
+            100% { transform: translate(8vw, -6vh) scale(1.15); }
+        }
+
+        .glass { background: rgba(255,255,255,.04); backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,.09); }
+        .glass-strong { background: rgba(0,0,0,.55); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,.12); }
+
+        .glow-green:hover { box-shadow: 0 0 45px rgba(29,185,84,.45); }
+        .text-gradient {
+            background: linear-gradient(100deg, #1DB954 0%, #fff 50%, #ff5500 100%);
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+
+        .float { animation: float 6s ease-in-out infinite; }
+        @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+
+        .fade-up { opacity: 0; transform: translateY(28px); transition: opacity .8s ease, transform .8s ease; }
+        .fade-up.visible { opacity: 1; transform: translateY(0); }
+
+        .step-num {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 2rem; height: 2rem; border-radius: 9999px;
+            background: #1DB954; color: #000; font-weight: 900; flex-shrink: 0;
+        }
+        code.cmd {
+            background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+            padding: .15rem .5rem; border-radius: .4rem; font-size: .85em;
+        }
+    </style>
+</head>
+<body class="text-white antialiased">
+
+    <!-- Animated Background -->
+    <div class="aurora">
+        <div class="blob green"></div>
+        <div class="blob orange"></div>
+        <div class="blob red"></div>
+        <div class="absolute inset-0" style="background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,.75) 100%);"></div>
+    </div>
+
+    <!-- Nav -->
+    <nav class="fixed top-0 inset-x-0 z-50 glass-strong">
+        <div class="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <img src="assets/main-logo.png" alt="LiberAudio" class="h-9 w-9 object-contain" />
+                <span class="font-black tracking-tight text-lg">LiberAudio</span>
+            </div>
+            <div class="flex items-center gap-5 text-sm font-semibold text-white/70">
+                <a href="#download" class="hover:text-white transition-colors">Download</a>
+                <a href="#features" class="hover:text-white transition-colors hidden sm:inline">Features</a>
+                <a href="#gatekeeper" class="hover:text-white transition-colors">Install&nbsp;Help</a>
+                <a href="https://github.com/Wirthzig/LiberAudio" target="_blank" rel="noopener"
+                   class="px-4 py-1.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 transition-all hover:scale-105">
+                    GitHub ★
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <header class="min-h-screen flex flex-col items-center justify-center text-center px-6 pt-24 pb-16">
+        <img src="assets/main-logo.png" alt="LiberAudio logo" class="h-36 md:h-44 float drop-shadow-[0_0_60px_rgba(29,185,84,.45)]" />
+        <h1 class="mt-8 text-5xl md:text-7xl font-black tracking-tighter">
+            <span>Free Your Music.</span>
+        </h1>
+        <p class="mt-5 max-w-xl text-lg text-white/60 leading-relaxed">
+            Turn your <span class="text-[#1DB954] font-bold">Spotify</span>,
+            <span class="text-[#ff5500] font-bold">SoundCloud</span> and
+            <span class="text-[#ff4444] font-bold">YouTube</span> playlists into a
+            local, high-quality music library. One click. No account walls. No nonsense.
+        </p>
+
+        <!-- Dynamic Download Buttons -->
+        <div id="download" class="mt-10 flex flex-col items-center gap-4">
+            <div class="flex flex-col sm:flex-row gap-4">
+                <a id="dl-arm" href="https://github.com/Wirthzig/LiberAudio/releases/latest" target="_blank" rel="noopener"
+                   class="glow-green group flex items-center gap-3 px-8 py-4 rounded-2xl bg-[#1DB954] text-black font-black text-lg transition-all hover:scale-105 active:scale-95 shadow-2xl">
+                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+                    <span>Download for Apple&nbsp;Silicon (M-Series)</span>
+                </a>
+                <a id="dl-intel" href="https://github.com/Wirthzig/LiberAudio/releases/latest" target="_blank" rel="noopener"
+                   class="group flex items-center gap-3 px-8 py-4 rounded-2xl glass font-black text-lg text-white transition-all hover:scale-105 hover:bg-white/10 active:scale-95">
+                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+                    <span>Download for Intel&nbsp;Mac</span>
+                </a>
+            </div>
+            <p id="version-line" class="text-sm text-white/40 font-semibold tracking-wide">Fetching latest version…</p>
+            <p class="text-xs text-white/30">macOS 11+ · Free &amp; Open Source · Auto-updates itself</p>
+        </div>
+
+        <!-- App screenshot -->
+        <div class="mt-16 max-w-4xl w-full fade-up">
+            <div class="glass rounded-3xl p-2 shadow-2xl">
+                <img src="assets/main-page.png" alt="LiberAudio screenshot" class="rounded-2xl w-full" loading="lazy" />
+            </div>
+        </div>
+    </header>
+
+    <!-- Features -->
+    <section id="features" class="max-w-6xl mx-auto px-6 py-24">
+        <h2 class="text-4xl md:text-5xl font-black text-center tracking-tighter fade-up">Why LiberAudio?</h2>
+        <div class="mt-14 grid md:grid-cols-3 gap-6">
+            <div class="glass rounded-3xl p-8 fade-up hover:scale-[1.02] transition-transform">
+                <div class="text-4xl">🎧</div>
+                <h3 class="mt-4 text-xl font-black text-[#1DB954]">Three platforms, one app</h3>
+                <p class="mt-2 text-white/60 leading-relaxed text-sm">Paste a Spotify, SoundCloud or YouTube link — tracks, albums or whole playlists. LiberAudio finds the best audio source and grabs it.</p>
+            </div>
+            <div class="glass rounded-3xl p-8 fade-up hover:scale-[1.02] transition-transform" style="transition-delay:.1s">
+                <div class="text-4xl">⚡</div>
+                <h3 class="mt-4 text-xl font-black text-[#ff5500]">Seriously fast</h3>
+                <p class="mt-2 text-white/60 leading-relaxed text-sm">Parallel downloads, stream-copy audio (no slow re-encoding), and native Apple Silicon binaries. A 50-track playlist lands in minutes.</p>
+            </div>
+            <div class="glass rounded-3xl p-8 fade-up hover:scale-[1.02] transition-transform" style="transition-delay:.2s">
+                <div class="text-4xl">🏷️</div>
+                <h3 class="mt-4 text-xl font-black text-[#ff4444]">Beautiful metadata</h3>
+                <p class="mt-2 text-white/60 leading-relaxed text-sm">Every file gets proper title, artist and embedded cover art — your library looks perfect in Apple Music, iTunes or any player.</p>
+            </div>
+            <div class="glass rounded-3xl p-8 fade-up hover:scale-[1.02] transition-transform">
+                <div class="text-4xl">🧠</div>
+                <h3 class="mt-4 text-xl font-black text-[#1DB954]">Smart matching</h3>
+                <p class="mt-2 text-white/60 leading-relaxed text-sm">Multi-tier search with duration verification rejects covers, remixes and karaoke versions — you get the real song, not a 10-hour loop.</p>
+            </div>
+            <div class="glass rounded-3xl p-8 fade-up hover:scale-[1.02] transition-transform" style="transition-delay:.1s">
+                <div class="text-4xl">📂</div>
+                <h3 class="mt-4 text-xl font-black text-[#ff5500]">Knows what you have</h3>
+                <p class="mt-2 text-white/60 leading-relaxed text-sm">Download history plus folder sync: LiberAudio recognizes songs already on disk and never downloads anything twice.</p>
+            </div>
+            <div class="glass rounded-3xl p-8 fade-up hover:scale-[1.02] transition-transform" style="transition-delay:.2s">
+                <div class="text-4xl">🔄</div>
+                <h3 class="mt-4 text-xl font-black text-[#ff4444]">Always up to date</h3>
+                <p class="mt-2 text-white/60 leading-relaxed text-sm">The app updates itself, and its download engine (yt-dlp) auto-updates too — so it keeps working when platforms change things.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Gatekeeper / Quarantine Help -->
+    <section id="gatekeeper" class="max-w-4xl mx-auto px-6 py-24">
+        <div class="glass-strong rounded-3xl p-8 md:p-12 fade-up">
+            <h2 class="text-3xl md:text-4xl font-black tracking-tighter">
+                🛡️ macOS says the app is <span class="text-[#ff4444]">“damaged”</span>?
+            </h2>
+            <p class="mt-4 text-white/60 leading-relaxed">
+                That's not damage — it's Apple's <strong class="text-white">Gatekeeper</strong>. LiberAudio is free and open source,
+                so we don't pay Apple's yearly notarization fee. macOS marks any app downloaded outside the App Store with a
+                “quarantine” flag. Removing it takes 10 seconds — pick either way:
+            </p>
+
+            <div class="mt-8 grid md:grid-cols-2 gap-6">
+                <!-- Option 1 -->
+                <div class="rounded-2xl bg-white/5 border border-white/10 p-6">
+                    <h3 class="font-black text-lg text-[#1DB954]">Option 1 — The Terminal way <span class="text-white/40 text-xs font-bold">(recommended)</span></h3>
+                    <ol class="mt-4 space-y-4 text-sm text-white/70">
+                        <li class="flex gap-3"><span class="step-num">1</span><span>Drag <strong class="text-white">LiberAudio</strong> from the DMG into <strong class="text-white">Applications</strong>.</span></li>
+                        <li class="flex gap-3"><span class="step-num">2</span><span>Open <strong class="text-white">Terminal</strong> (⌘ + Space, type “Terminal”).</span></li>
+                        <li class="flex gap-3"><span class="step-num">3</span>
+                            <span>Paste this command and press Enter:
+                                <button onclick="copyCmd(this)" data-cmd="xattr -cr /Applications/LiberAudio.app"
+                                    class="mt-2 w-full text-left font-mono text-[13px] bg-black/60 border border-[#1DB954]/40 rounded-xl px-4 py-3 hover:border-[#1DB954] transition-colors group relative">
+                                    <span class="text-[#1DB954]">$</span> xattr -cr /Applications/LiberAudio.app
+                                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase font-black text-white/40 group-hover:text-[#1DB954]">copy</span>
+                                </button>
+                            </span>
+                        </li>
+                        <li class="flex gap-3"><span class="step-num">4</span><span>Open the app normally. Done forever ✅</span></li>
+                    </ol>
+                </div>
+
+                <!-- Option 2 -->
+                <div class="rounded-2xl bg-white/5 border border-white/10 p-6">
+                    <h3 class="font-black text-lg text-[#ff5500]">Option 2 — No Terminal needed</h3>
+                    <ol class="mt-4 space-y-4 text-sm text-white/70">
+                        <li class="flex gap-3"><span class="step-num">1</span><span>Drag <strong class="text-white">LiberAudio</strong> into <strong class="text-white">Applications</strong>.</span></li>
+                        <li class="flex gap-3"><span class="step-num">2</span><span><strong class="text-white">Right-click</strong> (or Control-click) the app → choose <strong class="text-white">Open</strong>.</span></li>
+                        <li class="flex gap-3"><span class="step-num">3</span><span>In the warning dialog, click <strong class="text-white">Open</strong> again.</span></li>
+                        <li class="flex gap-3"><span class="step-num">4</span><span>On newer macOS: if there's no Open button, go to <strong class="text-white">System Settings → Privacy &amp; Security</strong> and click <strong class="text-white">“Open Anyway”</strong>.</span></li>
+                    </ol>
+                    <p class="mt-4 text-xs text-white/40">💡 The DMG also includes a <strong>“Fix LiberAudio.command”</strong> file — double-click it to run the fix automatically.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ / trust strip -->
+    <section class="max-w-4xl mx-auto px-6 pb-24">
+        <div class="grid sm:grid-cols-3 gap-4 text-center fade-up">
+            <div class="glass rounded-2xl px-6 py-5"><p class="text-2xl font-black text-[#1DB954]">100% Free</p><p class="text-xs text-white/50 mt-1">MIT-licensed, open source</p></div>
+            <div class="glass rounded-2xl px-6 py-5"><p class="text-2xl font-black text-[#ff5500]">No tracking</p><p class="text-xs text-white/50 mt-1">No analytics, no accounts</p></div>
+            <div class="glass rounded-2xl px-6 py-5"><p class="text-2xl font-black text-[#ff4444]">Auto-updates</p><p class="text-xs text-white/50 mt-1">Always the newest version</p></div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="glass-strong border-t border-white/10">
+        <div class="max-w-6xl mx-auto px-6 py-12 text-center space-y-6">
+            <div class="flex items-center justify-center gap-4">
+                <a href="https://github.com/Wirthzig/LiberAudio" target="_blank" rel="noopener" class="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-sm font-bold transition-all hover:scale-105">⭐ Star on GitHub</a>
+                <a href="https://ko-fi.com/liberaudio" target="_blank" rel="noopener" class="px-5 py-2.5 rounded-full bg-[#1DB954] text-black hover:bg-[#1ed760] text-sm font-black transition-all hover:scale-105">☕ Buy us a coffee</a>
+            </div>
+            <p class="max-w-2xl mx-auto text-[11px] leading-relaxed text-white/35">
+                ⚠️ <strong>Disclaimer:</strong> LiberAudio is a proof of concept for educational purposes only.
+                By using it you agree to respect the Terms of Service of Spotify, SoundCloud and YouTube.
+                Do not use this tool to infringe copyright. The authors assume no liability for misuse.
+            </p>
+            <p class="text-xs text-white/25">© <span id="year"></span> Alexander Wirths · Made with ❤️ and far too much coffee</p>
+        </div>
+    </footer>
+
+    <script>
+        document.getElementById('year').textContent = new Date().getFullYear();
+
+        // --- Always-current download buttons via GitHub Releases API ---
+        const RELEASES_LATEST = 'https://api.github.com/repos/Wirthzig/LiberAudio/releases/latest';
+        fetch(RELEASES_LATEST)
+            .then(r => r.json())
+            .then(rel => {
+                if (!rel || !rel.assets) return;
+                const arm = rel.assets.find(a => /arm64.*\.dmg$/i.test(a.name));
+                const intel = rel.assets.find(a => /x64.*\.dmg$/i.test(a.name));
+                if (arm) document.getElementById('dl-arm').href = arm.browser_download_url;
+                if (intel) document.getElementById('dl-intel').href = intel.browser_download_url;
+                const date = rel.published_at ? new Date(rel.published_at).toLocaleDateString() : '';
+                document.getElementById('version-line').textContent =
+                    `Latest: ${rel.tag_name || rel.name} ${date ? '· released ' + date : ''}`;
+            })
+            .catch(() => {
+                document.getElementById('version-line').textContent = 'Latest release on GitHub →';
+            });
+
+        // --- Best-effort chip detection: highlight the likely-correct button ---
+        (async () => {
+            try {
+                // WebGL renderer string mentions "Apple" GPUs on Apple Silicon Macs
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl');
+                const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+                const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '';
+                const isMac = navigator.platform.toLowerCase().includes('mac');
+                if (isMac && renderer && !/apple/i.test(renderer)) {
+                    // Likely Intel Mac: swap visual prominence
+                    const arm = document.getElementById('dl-arm');
+                    const intel = document.getElementById('dl-intel');
+                    arm.className = intel.className;
+                    intel.className = 'glow-green group flex items-center gap-3 px-8 py-4 rounded-2xl bg-[#1DB954] text-black font-black text-lg transition-all hover:scale-105 active:scale-95 shadow-2xl';
+                }
+            } catch (e) { /* keep defaults */ }
+        })();
+
+        // --- Scroll-in animations ---
+        const io = new IntersectionObserver(entries => {
+            entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+        }, { threshold: .12 });
+        document.querySelectorAll('.fade-up').forEach(el => io.observe(el));
+
+        // --- Copy command helper ---
+        function copyCmd(btn) {
+            navigator.clipboard.writeText(btn.dataset.cmd).then(() => {
+                const tag = btn.querySelector('span:last-child');
+                const old = tag.textContent;
+                tag.textContent = 'copied!';
+                setTimeout(() => tag.textContent = old, 1500);
+            });
+        }
+        window.copyCmd = copyCmd;
+    </script>
+</body>
+</html>
