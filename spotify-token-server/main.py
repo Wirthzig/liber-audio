@@ -73,6 +73,17 @@ def get_spotify_token():
         print(f"Error fetching token: {e}")
         raise HTTPException(status_code=502, detail="Failed to communicate with Spotify")
 
+@app.get("/client-id")
+def get_client_id():
+    """
+    Returns the PUBLIC Spotify client ID so the desktop app can run the
+    Authorization Code + PKCE flow (user login). The client secret is
+    never exposed - PKCE does not need it.
+    """
+    if not CLIENT_ID:
+        raise HTTPException(status_code=500, detail="Server misconfigured: Missing Spotify client ID")
+    return {"client_id": CLIENT_ID}
+
 @app.get("/config")
 def get_config():
     """
