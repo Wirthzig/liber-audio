@@ -422,10 +422,85 @@ const getSpotifyUserToken = async (): Promise<string | null> => {
     }
 };
 
+// --- ANONYMOUS USAGE ANALYTICS ---
+// Counts only: app launches and finished downloads. The install_id is a
+// random UUID created on first launch — it identifies this INSTALL, never
+// a person. No track titles, no playlists, no Spotify identity, no IPs.
+// Fully fire-and-forget: any failure is swallowed, the app never notices.
+// Users can opt out via the toggle in the Help/Welcome overlay.
+const ANALYTICS_PATH = path.join(APP_SUPPORT, 'analytics.json');
+
+interface AnalyticsState {
+    installId: string;
+    enabled: boolean;
+    pendingDownloads: number; // counted locally, flushed in batches
+}
+
+const loadAnalyticsState = (): AnalyticsState => {
+    try {
+        const data = JSON.parse(fs.readFileSync(ANALYTICS_PATH, 'utf-8'));
+        if (typeof data.installId === 'string' && data.installId.length === 36) {
+            return { installId: data.installId, enabled: data.enabled !== false, pendingDownloads: data.pendingDownloads || 0 };
+        }
+    } catch { /* first launch or corrupt file */ }
+    return { installId: crypto.randomUUID(), enabled: true, pendingDownloads: 0 };
+};
+
+const analyticsState = loadAnalyticsState();
+
+const saveAnalyticsState = () => {
+    try { fs.writeFileSync(ANALYTICS_PATH, JSON.stringify(analyticsState)); }
+    catch { /* never let analytics break anything */ }
+};
+saveAnalyticsState(); // persist installId on first launch
+
+const sendAnalyticsEvent = async (event: 'app_launch' | 'download', count = 1): Promise<boolean> => {
+    if (!analyticsState.enabled) return false;
+    try {
+        const res = await fetch(`${TOKEN_SERVER}/event`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                install_id: analyticsState.installId,
+                app_version: app.getVersion(),
+                arch: process.arch,
+                event,
+                count,
+            }),
+            signal: AbortSignal.timeout(8000),
+        });
+        return res.ok;
+    } catch { return false; } // offline / server asleep — silently skip
+};
+
+const recordDownload = () => {
+    analyticsState.pendingDownloads++;
+    saveAnalyticsState();
+};
+
+// Batched: one request per flush instead of one per song. Unsent counts
+// survive crashes via analytics.json and go out on the next flush/launch.
+let analyticsFlushing = false;
+const flushDownloads = async () => {
+    if (analyticsFlushing || analyticsState.pendingDownloads <= 0) return;
+    analyticsFlushing = true;
+    const count = analyticsState.pendingDownloads;
+    if (await sendAnalyticsEvent('download', count)) {
+        analyticsState.pendingDownloads -= count;
+        saveAnalyticsState();
+    }
+    analyticsFlushing = false;
+};
+
 app.whenReady().then(async () => {
     console.log(`[Main] App Ready. Node: ${process.version}, Arch: ${process.arch}, Platform: ${process.platform}`);
     loadSearchCache();
     createWindow();
+
+    // Anonymous usage ping + leftover download counts from the last session
+    sendAnalyticsEvent('app_launch');
+    flushDownloads();
+    setInterval(flushDownloads, 5 * 60 * 1000);
 
     // Initialize YTMusic in the background — do NOT await it here, otherwise
     // IPC handler registration is delayed and early renderer calls
@@ -865,10 +940,22 @@ app.whenReady().then(async () => {
             child.stderr.on('data', (d) => { stderrOutput += d.toString(); process.stderr.write(d); });
 
             child.on('close', (code) => {
-                if (code === 0) resolve({ success: true });
+                if (code === 0) {
+                    recordDownload(); // anonymous counter only — no titles
+                    resolve({ success: true });
+                }
                 else resolve({ success: false, error: stderrOutput || `Exit code ${code}` });
             });
         });
+    });
+
+    // --- ANALYTICS OPT-OUT IPC ---
+    ipcMain.handle('analytics-get-enabled', () => analyticsState.enabled);
+    ipcMain.handle('analytics-set-enabled', (_, enabled: boolean) => {
+        analyticsState.enabled = !!enabled;
+        if (!analyticsState.enabled) analyticsState.pendingDownloads = 0; // discard unsent counts on opt-out
+        saveAnalyticsState();
+        return analyticsState.enabled;
     });
 
     app.on('activate', () => {
@@ -905,6 +992,11 @@ autoUpdater.on('update-downloaded', () => {
     }).then((returnValue) => {
         if (returnValue.response === 0) autoUpdater.quitAndInstall();
     });
+});
+
+app.on('before-quit', () => {
+    // Best-effort flush; anything unsent is persisted and goes out next launch
+    flushDownloads();
 });
 
 app.on('window-all-closed', () => {

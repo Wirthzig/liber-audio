@@ -32,3 +32,4 @@ dist-ssr
 
 # Downloaded media (test artifacts)
 *.mp4
+__pycache__/
