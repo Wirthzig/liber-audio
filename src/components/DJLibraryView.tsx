@@ -187,7 +187,9 @@ export function DJLibraryView({ onBack }: Props) {
         && detected.rekordboxDbMtimeMs > detected.rekordboxXmlMtimeMs + 60_000
         && current?.library.source === 'rekordbox');
 
-    const visibleTracks: DJTrack[] = useMemo(() => {
+    // Rows carry their ORIGINAL crate position (n) so sorting/filtering never
+    // loses the natural order — and the third sort click restores it.
+    const visibleTracks: { t: DJTrack; n: number }[] = useMemo(() => {
         if (!current) return [];
         let tracks: DJTrack[];
         if (activeCrate === null) {
@@ -197,10 +199,11 @@ export function DJLibraryView({ onBack }: Props) {
             const byId = new Map(current.library.tracks.map(t => [t.id, t]));
             tracks = (crate?.trackIds ?? []).map(id => byId.get(id)).filter((t): t is DJTrack => !!t);
         }
+        let rows = tracks.map((t, i) => ({ t, n: i + 1 }));
 
         if (query.trim()) {
             const q = query.trim().toLowerCase();
-            tracks = tracks.filter(t =>
+            rows = rows.filter(({ t }) =>
                 t.title.toLowerCase().includes(q) ||
                 t.artist.toLowerCase().includes(q) ||
                 (t.album?.toLowerCase().includes(q) ?? false) ||
@@ -211,7 +214,8 @@ export function DJLibraryView({ onBack }: Props) {
         if (sortKey) {
             const dir = sortDir === 'asc' ? 1 : -1;
             // Missing values always sort last, regardless of direction
-            const cmp = (a: DJTrack, b: DJTrack): number => {
+            const cmp = (ra: { t: DJTrack }, rb: { t: DJTrack }): number => {
+                const a = ra.t, b = rb.t;
                 switch (sortKey) {
                     case 'title': return a.title.localeCompare(b.title) * dir;
                     case 'artist': return a.artist.localeCompare(b.artist) * dir;
@@ -236,14 +240,20 @@ export function DJLibraryView({ onBack }: Props) {
                     case 'cues': return (a.cues.length - b.cues.length) * dir;
                 }
             };
-            tracks = [...tracks].sort(cmp);
+            rows = [...rows].sort(cmp);
         }
-        return tracks;
+        return rows;
     }, [current, activeCrate, query, sortKey, sortDir]);
 
+    // Tri-state: first click sorts, second flips, third returns to crate order
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) {
-            setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+            const firstDir: SortDir = key === 'bpm' || key === 'cues' ? 'desc' : 'asc';
+            if (sortDir === firstDir) {
+                setSortDir(firstDir === 'asc' ? 'desc' : 'asc');
+            } else {
+                setSortKey(null); // back to natural order
+            }
         } else {
             setSortKey(key);
             setSortDir(key === 'bpm' || key === 'cues' ? 'desc' : 'asc'); // BPM/cues: high first feels natural
@@ -460,7 +470,8 @@ export function DJLibraryView({ onBack }: Props) {
                             </span>
                         </div>
 
-                        <div className="grid grid-cols-[1fr_180px_70px_60px_60px_60px] gap-3 px-4 py-2 border-b border-white/10 text-[10px] shrink-0">
+                        <div className="grid grid-cols-[44px_1fr_180px_70px_60px_60px_60px] gap-3 px-4 py-2 border-b border-white/10 text-[10px] shrink-0">
+                            <span className="uppercase tracking-widest font-bold text-gray-500">#</span>
                             <SortHeader label="Title" k="title" />
                             <SortHeader label="Artist" k="artist" />
                             <SortHeader label="BPM" k="bpm" />
@@ -469,8 +480,9 @@ export function DJLibraryView({ onBack }: Props) {
                             <SortHeader label="Cues" k="cues" />
                         </div>
                         <div className="flex-1 overflow-y-auto">
-                            {visibleTracks.map((t, i) => (
-                                <div key={t.id + i} className="grid grid-cols-[1fr_180px_70px_60px_60px_60px] gap-3 px-4 py-2 text-sm border-b border-white/5 hover:bg-white/5 items-center">
+                            {visibleTracks.map(({ t, n }, i) => (
+                                <div key={t.id + i} className="grid grid-cols-[44px_1fr_180px_70px_60px_60px_60px] gap-3 px-4 py-2 text-sm border-b border-white/5 hover:bg-white/5 items-center">
+                                    <span className="text-gray-600 tabular-nums text-xs">{n}</span>
                                     <span className="truncate flex items-center space-x-2">
                                         {t.fileExists === false && (
                                             <span title={`File missing: ${t.path}`}><AlertTriangle size={13} className="text-amber-400 shrink-0" /></span>
