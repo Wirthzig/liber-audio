@@ -645,11 +645,28 @@ app.whenReady().then(async () => {
     });
 
     // --- DJ LIBRARY READER (Phase 1: read-only) ---
+    // XML exports the user located manually (auto-detection only checks the
+    // common spots) — persisted so they survive restarts instead of re-asking
+    const DJ_PATHS_FILE = path.join(APP_SUPPORT, 'dj-paths.json');
+    const readDjPaths = (): { rekordboxXml?: string; itunesXml?: string } => {
+        try { return JSON.parse(fs.readFileSync(DJ_PATHS_FILE, 'utf-8')); } catch { return {}; }
+    };
+
     // Parses Serato (_Serato_ binary), Rekordbox (xml export) and iTunes/Music
     // (Library.xml export) into one canonical model. Never writes anything.
     ipcMain.handle('dj-detect-libraries', () => {
         try {
-            return { success: true, detected: detectLibraries() };
+            const detected = detectLibraries();
+            // Manually located exports win over auto-detection
+            const saved = readDjPaths();
+            if (saved.rekordboxXml && fs.existsSync(saved.rekordboxXml)) {
+                detected.rekordboxXml = saved.rekordboxXml;
+                detected.rekordboxXmlMtimeMs = fs.statSync(saved.rekordboxXml).mtimeMs;
+            }
+            if (saved.itunesXml && fs.existsSync(saved.itunesXml)) {
+                detected.itunesXml = saved.itunesXml;
+            }
+            return { success: true, detected };
         } catch (e: any) {
             console.error('[DJ] Detection failed:', e);
             return { success: false, error: e.message };
@@ -852,14 +869,26 @@ app.whenReady().then(async () => {
         return { success: false, error: 'Could not find the rekordbox app' };
     });
 
-    ipcMain.handle('dj-select-xml', async (_, title: string) => {
+    ipcMain.handle('dj-select-xml', async (_, kind: 'rekordbox' | 'itunes') => {
+        const title = kind === 'rekordbox'
+            ? 'Choose your rekordbox.xml export'
+            : 'Choose your iTunes/Music Library.xml export';
         const result = await dialog.showOpenDialog({
             properties: ['openFile'],
             title,
             message: title, // macOS shows 'message', not 'title'
             filters: [{ name: 'XML Library Export', extensions: ['xml'] }],
         });
-        return result.canceled ? null : result.filePaths[0];
+        if (result.canceled || !result.filePaths[0]) return null;
+        const file = result.filePaths[0];
+        // Remember the choice — detection returns it on every future launch
+        try {
+            fs.writeFileSync(DJ_PATHS_FILE, JSON.stringify({
+                ...readDjPaths(),
+                [kind === 'rekordbox' ? 'rekordboxXml' : 'itunesXml']: file,
+            }));
+        } catch (e) { console.warn('[DJ] Could not persist xml path:', e); }
+        return file;
     });
 
     // --- GENERIC METADATA SCANNER (SC/YT) ---

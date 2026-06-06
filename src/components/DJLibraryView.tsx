@@ -187,9 +187,9 @@ export function DJLibraryView({ onBack }: Props) {
     useEffect(() => { loadAll(); }, []);
 
     const pickXml = async (kind: 'rekordbox' | 'itunes') => {
-        const file = await window.electronAPI.djSelectXml(
-            kind === 'rekordbox' ? 'Choose your rekordbox.xml export' : 'Choose your iTunes/Music Library.xml export'
-        );
+        // The chosen path is persisted in the main process — future launches
+        // pick it up via detection instead of re-asking
+        const file = await window.electronAPI.djSelectXml(kind);
         if (file) loadAll(kind === 'rekordbox' ? { rekordboxXmlPath: file } : { itunesXmlPath: file });
     };
 

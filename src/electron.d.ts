@@ -70,7 +70,7 @@ export interface ElectronAPI {
     spotifySetClientId: (clientId: string | null) => Promise<{ success: boolean; error?: string }>;
     djDetectLibraries: () => Promise<{ success: boolean; detected?: DetectedLibraries; error?: string }>;
     djLoadLibraries: (req: { seratoPath?: string; rekordboxXmlPath?: string; itunesXmlPath?: string }) => Promise<{ success: boolean; libraries?: LoadedLibrary[]; errors?: string[]; error?: string }>;
-    djSelectXml: (title: string) => Promise<string | null>;
+    djSelectXml: (kind: 'rekordbox' | 'itunes') => Promise<string | null>;
     djOpenRekordbox: () => Promise<{ success: boolean; error?: string }>;
     djGetDestinations: () => Promise<DJDestination[]>;
     djSetDestinations: (destinations: DJDestination[]) => Promise<{ success: boolean; error?: string }>;
