@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, Disc3, ExternalLink, 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DetectedLibraries, DJCue, DJTrack, LoadedLibrary } from '../electron';
 import { SpotlightTour, type TourStep, useTour } from './SpotlightTour';
+import { SyncToSpotify } from './SyncToSpotify';
 import { TriageOverlay } from './TriageOverlay';
 
 interface Props {
@@ -15,6 +16,7 @@ const DJ_TOUR: TourStep[] = [
     { target: '[data-tour="dj-crates"]', title: 'Crates & playlists', text: 'Browse the full crate tree of the selected library. Click one to filter the track table.' },
     { target: '[data-tour="dj-table"]', title: 'Tracks', text: 'Title, BPM, key, and your hot cues/loops read straight from the files. Click a column header to sort.' },
     { target: '[data-tour="dj-search"]', title: 'Search', text: 'Filter by title, artist or album — or type an exact key like 8A to find harmonic matches.' },
+    { target: '[data-tour="dj-spotify-sync"]', title: 'Sync to Spotify', text: 'Push the crate or playlist you\'re viewing into one of your Spotify playlists — tracks are matched by artist and title, and nothing is ever removed.' },
     { target: '[data-tour="dj-triage"]', title: 'Sort new tracks', text: '"Tinder for new songs": listen to each track and flick it into your crates and playlists — Serato, rekordbox, Apple Music and Spotify in one go.' },
 ];
 
@@ -307,6 +309,12 @@ export function DJLibraryView({ onBack }: Props) {
                     </div>
                 </div>
                 <div className="flex items-center space-x-3" style={{ WebkitAppRegion: 'no-drag' } as any}>
+                    {/* Push the current view into a Spotify playlist (additive) */}
+                    <SyncToSpotify
+                        tracks={visibleTracks.map(r => r.t)}
+                        crateName={activeCrate !== null && current ? current.library.crates[activeCrate]?.name ?? 'All Tracks' : 'All Tracks'}
+                    />
+
                     {/* Sort new tracks — triage entry point */}
                     <div className="relative" data-tour="dj-triage">
                         <button
