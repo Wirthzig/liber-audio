@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion';
-import { Check, Copy, ExternalLink, Loader2, LogIn, LogOut, X } from 'lucide-react';
+import { Check, Copy, ExternalLink, FolderPlus, Loader2, LogIn, LogOut, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { SpotifyConfig } from '../electron';
+import { LibraryManager } from '../utils/libraryManager';
 
 // Any component can open the settings panel (e.g. the triage done screen
 // after a Spotify rate-limit) without prop-drilling through the view tree.
@@ -14,6 +15,22 @@ export function SettingsOverlay({ onClose }: { onClose: () => void }) {
     const [copied, setCopied] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showByo, setShowByo] = useState(false);
+
+    // Library sync (same index the start-screen button feeds)
+    const [folders, setFolders] = useState<string[]>(() => LibraryManager.getFolders());
+    const [songCount, setSongCount] = useState(() => LibraryManager.getIndex().size);
+    const [syncing, setSyncing] = useState(false);
+
+    const addFolder = async () => {
+        if (syncing) return;
+        const folder = await window.electronAPI.selectFolder('Choose your music library folder to scan');
+        if (!folder) return;
+        setSyncing(true);
+        await LibraryManager.sync(folder);
+        setFolders(LibraryManager.getFolders());
+        setSongCount(LibraryManager.getIndex().size);
+        setSyncing(false);
+    };
 
     const refresh = () => window.electronAPI.spotifyGetConfig().then(c => {
         setConfig(c);
@@ -197,6 +214,34 @@ export function SettingsOverlay({ onClose }: { onClose: () => void }) {
                         {error && <p className="text-red-400 text-xs mt-3">{error}</p>}
                     </>
                 )}
+
+                {/* --- LIBRARY --- */}
+                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-8 mb-3">Library</p>
+                <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm font-bold">{songCount.toLocaleString()} songs known</p>
+                            <p className="text-xs text-gray-500">
+                                Synced folders + your DJ libraries — these are never downloaded again
+                            </p>
+                        </div>
+                        <button
+                            onClick={addFolder}
+                            disabled={syncing}
+                            className="flex items-center space-x-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold transition-colors disabled:opacity-40 shrink-0"
+                        >
+                            {syncing ? <Loader2 size={14} className="animate-spin" /> : <FolderPlus size={14} />}
+                            <span>{syncing ? 'Scanning…' : 'Add folder'}</span>
+                        </button>
+                    </div>
+                    {folders.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                            {folders.map(f => (
+                                <p key={f} className="text-xs text-gray-400 font-mono truncate" title={f}>{f}</p>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
         </motion.div>
     );
