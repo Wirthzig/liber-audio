@@ -162,18 +162,19 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                             </div>
 
                             <div className="bg-blue-500/10 border border-blue-500/50 rounded-xl p-4 mb-6">
-                                <h3 className="text-blue-400 font-bold text-sm uppercase mb-1">Requirement: Public Playlists</h3>
+                                <h3 className="text-blue-400 font-bold text-sm uppercase mb-1">Playlist Access</h3>
                                 <p className="text-xs text-blue-200/80 leading-relaxed">
-                                    Please ensure your playlists on Spotify/SoundCloud/YouTube are set to <strong>Public</strong>.
-                                    The tool cannot access Private or Collaborative playlists.
+                                    SoundCloud and YouTube playlists must be set to <strong>Public</strong>.
+                                    For Spotify, log in via <strong>Settings</strong> (top right) to also access your
+                                    Private and Collaborative playlists.
                                 </p>
                             </div>
 
                             <p className="text-gray-400 mb-8 leading-relaxed">
-                                This application allows you to download your favorite music from Spotify, SoundCloud, and YouTube in high quality.
+                                Download your favorite music from Spotify, SoundCloud, and YouTube in high quality —
+                                then sort it into your DJ Library: triage new tracks into Serato crates, rekordbox
+                                and Apple Music playlists, with your hot cues and loops in view.
                             </p>
-
-                            {/* Spotify Setup Removed - Handled by Backend */}
 
                             <button
                                 onClick={dismissOnboarding}
