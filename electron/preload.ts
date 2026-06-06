@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     spotifyGetConfig: () => ipcRenderer.invoke('spotify-get-config'),
     spotifySetClientId: (clientId: string | null) => ipcRenderer.invoke('spotify-set-client-id', clientId),
     djDetectLibraries: () => ipcRenderer.invoke('dj-detect-libraries'),
+    djOwnedTracks: () => ipcRenderer.invoke('dj-owned-tracks'),
     djLoadLibraries: (req: any) => ipcRenderer.invoke('dj-load-libraries', req),
     djSelectXml: (kind: 'rekordbox' | 'itunes') => ipcRenderer.invoke('dj-select-xml', kind),
     djOpenRekordbox: () => ipcRenderer.invoke('dj-open-rekordbox'),

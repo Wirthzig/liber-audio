@@ -69,6 +69,7 @@ export interface ElectronAPI {
     spotifyGetConfig: () => Promise<SpotifyConfig>;
     spotifySetClientId: (clientId: string | null) => Promise<{ success: boolean; error?: string }>;
     djDetectLibraries: () => Promise<{ success: boolean; detected?: DetectedLibraries; error?: string }>;
+    djOwnedTracks: () => Promise<{ success: boolean; tracks?: { artist: string; title: string }[]; error?: string }>;
     djLoadLibraries: (req: { seratoPath?: string; rekordboxXmlPath?: string; itunesXmlPath?: string }) => Promise<{ success: boolean; libraries?: LoadedLibrary[]; errors?: string[]; error?: string }>;
     djSelectXml: (kind: 'rekordbox' | 'itunes') => Promise<string | null>;
     djOpenRekordbox: () => Promise<{ success: boolean; error?: string }>;

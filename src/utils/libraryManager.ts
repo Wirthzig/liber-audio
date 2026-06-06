@@ -69,19 +69,37 @@ export class LibraryManager {
         if (this.refreshed) return; // once per session — views remount often
         this.refreshed = true;
         const folders = this.getFolders();
-        if (folders.length === 0) return;
-        const index = new Set<string>();
-        for (const folder of folders) {
-            try {
-                const res = await window.electronAPI.scanLibrary(folder);
-                if (res.success && res.files) {
-                    res.files.map(normalizeForMatch).forEach(n => { if (n) index.add(n); });
+        if (folders.length > 0) {
+            const index = new Set<string>();
+            for (const folder of folders) {
+                try {
+                    const res = await window.electronAPI.scanLibrary(folder);
+                    if (res.success && res.files) {
+                        res.files.map(normalizeForMatch).forEach(n => { if (n) index.add(n); });
+                    }
+                } catch (e) {
+                    console.warn(`Library refresh failed for ${folder}`, e);
                 }
-            } catch (e) {
-                console.warn(`Library refresh failed for ${folder}`, e);
             }
+            this.persist(folders, index);
         }
-        this.persist(folders, index);
+        await this.mergeDjLibraries();
+    }
+
+    /** Merge every track from the DJ libraries (Serato/rekordbox/iTunes)
+     *  into the owned index — in memory only, so it can never go stale in
+     *  localStorage. Playlist scans then skip songs the DJ already has. */
+    private static async mergeDjLibraries(): Promise<void> {
+        try {
+            const res = await window.electronAPI.djOwnedTracks();
+            if (!res.success || !res.tracks) return;
+            const index = this.getIndex();
+            for (const t of res.tracks) {
+                const n = normalizeForMatch(`${t.artist} - ${t.title}`);
+                if (n) index.add(n);
+            }
+            this.cachedIndex = index;
+        } catch { /* DJ libraries unavailable — the folder index still applies */ }
     }
 
     /** Does the library contain this song? */

@@ -673,6 +673,28 @@ app.whenReady().then(async () => {
         }
     });
 
+    // Artist/title of every track in any DJ library — merged into the
+    // renderer's "owned" index so playlist scans don't offer duplicates.
+    // Parsed once per app run (library files don't change mid-session).
+    let djOwnedCache: { artist: string; title: string }[] | null = null;
+    ipcMain.handle('dj-owned-tracks', () => {
+        try {
+            if (!djOwnedCache) {
+                const det = detectLibraries();
+                const saved = readDjPaths();
+                const { libraries } = loadLibraries({
+                    seratoPath: det.serato ?? undefined,
+                    rekordboxXmlPath: (saved.rekordboxXml && fs.existsSync(saved.rekordboxXml) ? saved.rekordboxXml : det.rekordboxXml) ?? undefined,
+                    itunesXmlPath: (saved.itunesXml && fs.existsSync(saved.itunesXml) ? saved.itunesXml : det.itunesXml) ?? undefined,
+                });
+                djOwnedCache = libraries.flatMap(l => l.library.tracks.map(t => ({ artist: t.artist, title: t.title })));
+            }
+            return { success: true, tracks: djOwnedCache };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    });
+
     ipcMain.handle('dj-load-libraries', (_, req: LoadRequest) => {
         try {
             const { libraries, errors } = loadLibraries(req);
