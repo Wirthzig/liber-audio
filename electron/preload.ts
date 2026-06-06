@@ -14,4 +14,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     djLoadLibraries: (req: any) => ipcRenderer.invoke('dj-load-libraries', req),
     djSelectXml: (title: string) => ipcRenderer.invoke('dj-select-xml', title),
     djOpenRekordbox: () => ipcRenderer.invoke('dj-open-rekordbox'),
+    djGetDestinations: () => ipcRenderer.invoke('dj-get-destinations'),
+    djSetDestinations: (destinations: any[]) => ipcRenderer.invoke('dj-set-destinations', destinations),
+    djScanFolder: (folder: string) => ipcRenderer.invoke('dj-scan-folder', folder),
+    djApplyTriage: (assignments: any[]) => ipcRenderer.invoke('dj-apply-triage', assignments),
+    djRevealFile: (filePath: string) => ipcRenderer.invoke('dj-reveal-file', filePath),
 });

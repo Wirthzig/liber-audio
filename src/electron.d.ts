@@ -70,6 +70,39 @@ export interface ElectronAPI {
     djLoadLibraries: (req: { seratoPath?: string; rekordboxXmlPath?: string; itunesXmlPath?: string }) => Promise<{ success: boolean; libraries?: LoadedLibrary[]; errors?: string[]; error?: string }>;
     djSelectXml: (title: string) => Promise<string | null>;
     djOpenRekordbox: () => Promise<{ success: boolean; error?: string }>;
+    djGetDestinations: () => Promise<DJDestination[]>;
+    djSetDestinations: (destinations: DJDestination[]) => Promise<{ success: boolean; error?: string }>;
+    djScanFolder: (folder: string) => Promise<{ success: boolean; tracks?: (DJTrack & { mtimeMs: number })[]; error?: string }>;
+    djApplyTriage: (assignments: TriageAssignment[]) => Promise<TriageResult>;
+    djRevealFile: (filePath: string) => Promise<{ success: boolean }>;
+}
+
+// --- DJ TRIAGE TYPES ---
+export interface DJDestinationTarget {
+    seratoCrate?: string;       // crate file base name incl. %% hierarchy
+    musicPlaylist?: string;
+    rekordboxPlaylist?: string;
+}
+
+export interface DJDestination {
+    id: string;
+    name: string;
+    color: string;              // tailwind-ish hex for the button
+    target: DJDestinationTarget;
+}
+
+export interface TriageAssignment {
+    path: string;
+    title: string;
+    artist: string;
+    targets: DJDestinationTarget[];
+}
+
+export interface TriageResult {
+    serato: { crate: string; added: number; skipped: number }[];
+    music: { playlist: string; added: number; errors: string[] }[];
+    rekordbox: { xmlPath: string; playlists: number; tracks: number } | null;
+    errors: string[];
 }
 
 declare global {

@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'child_process';
 import crypto from 'crypto';
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron';
 import log from 'electron-log';
 import { autoUpdater } from 'electron-updater';
 import fs from 'fs';
@@ -10,6 +10,15 @@ import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { detectLibraries, loadLibraries, LoadRequest } from './dj/index';
+import { addToMusicPlaylist, MusicWriteResult } from './dj/writeMusic';
+import { writeRekordboxXml, RekordboxTrackRef } from './dj/writeRekordbox';
+import { appendToSeratoCrate, isSeratoRunning, SeratoWriteResult } from './dj/writeSerato';
+
+// Custom scheme so <audio> can stream local files in dev AND prod
+// (plain file:// is blocked by web security when the page is http://localhost)
+protocol.registerSchemesAsPrivileged([
+    { scheme: 'liberaudio', privileges: { secure: true, stream: true, supportFetchAPI: false } },
+]);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -494,6 +503,17 @@ const flushDownloads = async () => {
 
 app.whenReady().then(async () => {
     console.log(`[Main] App Ready. Node: ${process.version}, Arch: ${process.arch}, Platform: ${process.platform}`);
+
+    // liberaudio://<encoded absolute path> → streams the local audio file
+    protocol.registerFileProtocol('liberaudio', (request, callback) => {
+        try {
+            callback({ path: decodeURI(request.url.replace('liberaudio://', '')) });
+        } catch (e) {
+            console.error('[Main] liberaudio protocol error:', e);
+            callback({ error: -6 /* FILE_NOT_FOUND */ });
+        }
+    });
+
     loadSearchCache();
     createWindow();
 
@@ -590,6 +610,137 @@ app.whenReady().then(async () => {
             console.error('[DJ] Load failed:', e);
             return { success: false, error: e.message };
         }
+    });
+
+    // --- DJ TRIAGE (Phase 2: additive writes only) ---
+    const DJ_DESTINATIONS_PATH = path.join(APP_SUPPORT, 'dj-destinations.json');
+    const DJ_BACKUP_ROOT = path.join(APP_SUPPORT, 'dj-backups');
+
+    ipcMain.handle('dj-get-destinations', () => {
+        try {
+            if (fs.existsSync(DJ_DESTINATIONS_PATH)) {
+                return JSON.parse(fs.readFileSync(DJ_DESTINATIONS_PATH, 'utf-8'));
+            }
+        } catch (e) { console.warn('[DJ] Failed to read destinations:', e); }
+        return [];
+    });
+
+    ipcMain.handle('dj-set-destinations', (_, destinations: any[]) => {
+        try {
+            fs.writeFileSync(DJ_DESTINATIONS_PATH, JSON.stringify(destinations, null, 2));
+            return { success: true };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    });
+
+    // List audio files in a folder as triage candidates, newest first
+    // (titles parsed from the app's own "Artist - Title.ext" naming)
+    ipcMain.handle('dj-scan-folder', (_, folder: string) => {
+        try {
+            const AUDIO_EXTS = new Set(['.m4a', '.mp3', '.opus', '.flac', '.wav', '.aac', '.ogg', '.aif', '.aiff']);
+            const files = fs.readdirSync(folder)
+                .filter(f => AUDIO_EXTS.has(path.extname(f).toLowerCase()))
+                .map(f => {
+                    const full = path.join(folder, f);
+                    const base = path.basename(f, path.extname(f));
+                    const dash = base.indexOf(' - ');
+                    return {
+                        id: full,
+                        path: full,
+                        title: dash > 0 ? base.slice(dash + 3) : base,
+                        artist: dash > 0 ? base.slice(0, dash) : 'Unknown Artist',
+                        cues: [],
+                        mtimeMs: fs.statSync(full).mtimeMs,
+                    };
+                })
+                .sort((a, b) => b.mtimeMs - a.mtimeMs);
+            return { success: true, tracks: files };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    });
+
+    interface TriageAssignment {
+        path: string;
+        title: string;
+        artist: string;
+        targets: {
+            seratoCrate?: string;   // crate file base name incl. %% hierarchy
+            musicPlaylist?: string;
+            rekordboxPlaylist?: string;
+        }[];
+    }
+
+    ipcMain.handle('dj-apply-triage', async (_, assignments: TriageAssignment[]) => {
+        const result = {
+            serato: [] as SeratoWriteResult[],
+            music: [] as MusicWriteResult[],
+            rekordbox: null as { xmlPath: string; playlists: number; tracks: number } | null,
+            errors: [] as string[],
+        };
+
+        // Group: platform target -> track list
+        const seratoCrates = new Map<string, string[]>();
+        const musicPlaylists = new Map<string, string[]>();
+        const rbPlaylists = new Map<string, RekordboxTrackRef[]>();
+        for (const a of assignments) {
+            for (const t of a.targets) {
+                if (t.seratoCrate) {
+                    (seratoCrates.get(t.seratoCrate) ?? seratoCrates.set(t.seratoCrate, []).get(t.seratoCrate)!).push(a.path);
+                }
+                if (t.musicPlaylist) {
+                    (musicPlaylists.get(t.musicPlaylist) ?? musicPlaylists.set(t.musicPlaylist, []).get(t.musicPlaylist)!).push(a.path);
+                }
+                if (t.rekordboxPlaylist) {
+                    (rbPlaylists.get(t.rekordboxPlaylist) ?? rbPlaylists.set(t.rekordboxPlaylist, []).get(t.rekordboxPlaylist)!)
+                        .push({ path: a.path, title: a.title, artist: a.artist });
+                }
+            }
+        }
+
+        // Serato: guarded, backed up, verified
+        if (seratoCrates.size > 0) {
+            if (await isSeratoRunning()) {
+                result.errors.push('Serato is running — close it and apply again. (Nothing was written to Serato; other platforms proceeded.)');
+            } else {
+                const seratoRoot = detectLibraries().serato;
+                if (!seratoRoot) {
+                    result.errors.push('No Serato library found.');
+                } else {
+                    const backupDir = path.join(DJ_BACKUP_ROOT, new Date().toISOString().replace(/[:.]/g, '-'));
+                    for (const [crate, paths] of seratoCrates) {
+                        try {
+                            result.serato.push(appendToSeratoCrate(seratoRoot, crate, paths, backupDir));
+                        } catch (e: any) {
+                            result.errors.push(e.message);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apple Music: official AppleScript API
+        for (const [playlist, paths] of musicPlaylists) {
+            result.music.push(await addToMusicPlaylist(playlist, paths));
+        }
+
+        // rekordbox: timestamped xml export for manual import
+        if (rbPlaylists.size > 0) {
+            try {
+                result.rekordbox = writeRekordboxXml(path.join(APP_SUPPORT, 'rekordbox-exports'), rbPlaylists);
+            } catch (e: any) {
+                result.errors.push(`rekordbox export: ${e.message}`);
+            }
+        }
+
+        console.log(`[DJ] Triage applied: ${assignments.length} tracks → serato:${result.serato.length} crates, music:${result.music.length} playlists, rb:${result.rekordbox?.playlists ?? 0}`);
+        return result;
+    });
+
+    ipcMain.handle('dj-reveal-file', (_, filePath: string) => {
+        shell.showItemInFolder(filePath);
+        return { success: true };
     });
 
     // Best-effort launch of rekordbox so the user can re-export their xml.

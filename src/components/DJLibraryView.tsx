@@ -1,7 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, Disc3, ExternalLink, FileQuestion, FolderOpen, Loader2, ListMusic, Music2, RefreshCw, Repeat, Search, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, Disc3, ExternalLink, FileQuestion, FolderOpen, Loader2, ListMusic, Music2, RefreshCw, Repeat, Search, X, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DetectedLibraries, DJCue, DJTrack, LoadedLibrary } from '../electron';
+import { TriageOverlay } from './TriageOverlay';
 
 interface Props {
     onBack: () => void;
@@ -140,6 +141,8 @@ export function DJLibraryView({ onBack }: Props) {
     const [query, setQuery] = useState('');
     const [sortKey, setSortKey] = useState<SortKey | null>(null);
     const [sortDir, setSortDir] = useState<SortDir>('asc');
+    const [triageTracks, setTriageTracks] = useState<DJTrack[] | null>(null);
+    const [sourceMenu, setSourceMenu] = useState(false);
 
     const loadAll = async (overrides?: { rekordboxXmlPath?: string; itunesXmlPath?: string }) => {
         setLoading(true);
@@ -291,14 +294,59 @@ export function DJLibraryView({ onBack }: Props) {
                         <span className="text-[10px] uppercase tracking-widest bg-violet-500/20 border border-violet-500/40 text-violet-300 px-2 py-1 rounded-full font-bold">Read-only beta</span>
                     </div>
                 </div>
-                <button
-                    onClick={() => loadAll()}
-                    className="p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 transition-all hover:scale-105"
-                    title="Reload libraries"
-                    style={{ WebkitAppRegion: 'no-drag' } as any}
-                >
-                    <RefreshCw size={18} className={`stroke-[2.5] ${loading ? 'animate-spin' : ''}`} />
-                </button>
+                <div className="flex items-center space-x-3" style={{ WebkitAppRegion: 'no-drag' } as any}>
+                    {/* Sort new tracks — triage entry point */}
+                    <div className="relative">
+                        <button
+                            onClick={() => setSourceMenu(m => !m)}
+                            disabled={libraries.length === 0}
+                            className="px-5 py-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(167,139,250,0.35)] shadow-lg font-bold flex items-center space-x-2 disabled:opacity-40"
+                        >
+                            <Zap size={18} className="stroke-[2.5] text-violet-300" />
+                            <span className="text-sm uppercase tracking-wide">Sort new tracks</span>
+                        </button>
+                        <AnimatePresence>
+                            {sourceMenu && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                                    transition={{ duration: 0.15 }}
+                                    className="absolute right-0 top-full mt-2 z-50 bg-black/90 backdrop-blur-xl border border-white/15 rounded-2xl shadow-2xl p-2 w-64"
+                                >
+                                    <button
+                                        onClick={() => { setSourceMenu(false); setTriageTracks(visibleTracks.map(r => r.t)); }}
+                                        className="w-full text-left px-3 py-2.5 rounded-xl text-sm hover:bg-white/10 transition-colors"
+                                    >
+                                        <span className="font-bold block">Current view</span>
+                                        <span className="text-xs text-gray-500">{visibleTracks.length} tracks{activeCrate !== null && current ? ` · ${current.library.crates[activeCrate]?.name}` : ''}</span>
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            setSourceMenu(false);
+                                            const folder = await window.electronAPI.selectFolder('Choose the folder with your new tracks');
+                                            if (!folder) return;
+                                            const res = await window.electronAPI.djScanFolder(folder);
+                                            if (res.success && res.tracks) setTriageTracks(res.tracks);
+                                        }}
+                                        className="w-full text-left px-3 py-2.5 rounded-xl text-sm hover:bg-white/10 transition-colors"
+                                    >
+                                        <span className="font-bold block">Choose folder…</span>
+                                        <span className="text-xs text-gray-500">e.g. your downloads — newest first</span>
+                                    </button>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+
+                    <button
+                        onClick={() => loadAll()}
+                        className="p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 transition-all hover:scale-105"
+                        title="Reload libraries"
+                    >
+                        <RefreshCw size={18} className={`stroke-[2.5] ${loading ? 'animate-spin' : ''}`} />
+                    </button>
+                </div>
             </div>
 
             {loading ? (
@@ -505,6 +553,17 @@ export function DJLibraryView({ onBack }: Props) {
                     </motion.div>
                 </div>
             )}
+
+            {/* Triage overlay */}
+            <AnimatePresence>
+                {triageTracks && (
+                    <TriageOverlay
+                        tracks={triageTracks}
+                        libraries={libraries}
+                        onClose={() => { setTriageTracks(null); loadAll(); }}
+                    />
+                )}
+            </AnimatePresence>
 
             {/* Load errors toast */}
             {!loading && errors.length > 0 && libraries.length > 0 && (
