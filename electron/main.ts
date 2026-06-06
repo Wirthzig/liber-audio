@@ -690,7 +690,19 @@ app.whenReady().then(async () => {
     ipcMain.handle('dj-get-destinations', () => {
         try {
             if (fs.existsSync(DJ_DESTINATIONS_PATH)) {
-                return JSON.parse(fs.readFileSync(DJ_DESTINATIONS_PATH, 'utf-8'));
+                const raw = JSON.parse(fs.readFileSync(DJ_DESTINATIONS_PATH, 'utf-8'));
+                // Migrate the pre-groups shape: { target: {...} } with one
+                // playlist per platform → { targets: [...] } member list
+                return raw.map((d: any) => {
+                    if (d.targets || !d.target) return d;
+                    const t = d.target;
+                    const targets: any[] = [];
+                    if (t.seratoCrate) targets.push({ seratoCrate: t.seratoCrate });
+                    if (t.rekordboxPlaylist) targets.push({ rekordboxPlaylist: t.rekordboxPlaylist });
+                    if (t.musicPlaylist) targets.push({ musicPlaylist: t.musicPlaylist });
+                    if (t.spotifyPlaylistId) targets.push({ spotifyPlaylistId: t.spotifyPlaylistId, spotifyPlaylistName: t.spotifyPlaylistName });
+                    return { id: d.id, name: d.name, color: d.color, targets };
+                });
             }
         } catch (e) { console.warn('[DJ] Failed to read destinations:', e); }
         return [];

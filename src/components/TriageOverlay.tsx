@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, FolderOpen, Loader2, Music2, Pause, Play, Plus, Settings2, SkipForward, Sparkles, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DJDestination, DJTrack, LoadedLibrary, TriageAssignment, TriageResult } from '../electron';
+import type { DJDestination, DJDestinationTarget, DJTrack, LoadedLibrary, TriageAssignment, TriageResult } from '../electron';
 import { openSettings } from './SettingsOverlay';
 
 const WAVE_BARS = 120;
@@ -105,6 +105,19 @@ const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 // Crate file base ('%%'-joined hierarchy) — what the Serato writer expects
 const crateFileBase = (crate: { name: string; path: string[] }) => [...crate.path, crate.name].join('%%');
 
+// Stable identity for a group member (one platform playlist)
+const targetKey = (t: DJDestinationTarget) =>
+    t.seratoCrate ? 's:' + t.seratoCrate
+        : t.rekordboxPlaylist ? 'r:' + t.rekordboxPlaylist
+            : t.musicPlaylist ? 'm:' + t.musicPlaylist
+                : 'p:' + (t.spotifyPlaylistId ?? '');
+
+const memberInfo = (t: DJDestinationTarget) =>
+    t.seratoCrate ? { platform: 'Serato', cls: 'text-emerald-400', label: t.seratoCrate.split('%%').pop() ?? t.seratoCrate }
+        : t.rekordboxPlaylist ? { platform: 'rekordbox', cls: 'text-sky-400', label: t.rekordboxPlaylist }
+            : t.musicPlaylist ? { platform: 'Music', cls: 'text-pink-400', label: t.musicPlaylist }
+                : { platform: 'Spotify', cls: 'text-[#1DB954]', label: t.spotifyPlaylistName ?? 'playlist' };
+
 export function TriageOverlay({ tracks, libraries, onClose }: Props) {
     const [destinations, setDestinations] = useState<DJDestination[] | null>(null); // null = loading
     const [mode, setMode] = useState<'triage' | 'setup' | 'summary' | 'applying' | 'done'>('triage');
@@ -157,14 +170,14 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
         return [...byName.values()].filter(s => [s.serato, s.rekordbox, s.music].filter(Boolean).length >= 2);
     }, [seratoLib, rbLib, itunesLib]);
 
-    // Tracks already in a destination's Serato crate → duplicate warning
+    // Tracks already in one of a group's Serato crates → duplicate warning
     const alreadyIn = useMemo(() => {
         if (!track || !seratoLib) return new Set<string>();
         const hits = new Set<string>();
         for (const d of destinations ?? []) {
-            if (!d.target.seratoCrate) continue;
-            const crate = seratoLib.crates.find(c => crateFileBase(c) === d.target.seratoCrate);
-            if (crate?.trackIds.includes(track.id)) hits.add(d.id);
+            const hit = d.targets.some(t => t.seratoCrate
+                && seratoLib.crates.find(c => crateFileBase(c) === t.seratoCrate)?.trackIds.includes(track.id));
+            if (hit) hits.add(d.id);
         }
         return hits;
     }, [track, destinations, seratoLib]);
@@ -261,7 +274,8 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                 title: t.title,
                 artist: t.artist,
                 durationSec: t.durationSec,
-                targets: [...destIds].map(id => destById.get(id)?.target).filter((x): x is NonNullable<typeof x> => !!x),
+                // Groups fan out: every member playlist of every selected group
+                targets: [...destIds].flatMap(id => destById.get(id)?.targets ?? []),
             });
         }
         const res = await window.electronAPI.djApplyTriage(assignments);
@@ -588,7 +602,7 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
     const [drafts, setDrafts] = useState<DJDestination[]>(destinations);
     const [newName, setNewName] = useState('');
     const [pickerQuery, setPickerQuery] = useState('');
-    const [showPicker, setShowPicker] = useState(false);
+    const [pickerFor, setPickerFor] = useState<string | null>(null); // group id whose member picker is open
     const [spotifyPlaylists, setSpotifyPlaylists] = useState<{ id: string; name: string }[]>([]);
 
     // The user's own Spotify playlists, addable as destinations — only when
@@ -614,65 +628,80 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
         return () => { live = false; };
     }, []);
 
-    const addDraft = (name: string, target: DJDestination['target']) => {
+    const addDraft = (name: string, targets: DJDestinationTarget[]) => {
         setDrafts(prev => [...prev, {
             id: crypto.randomUUID(),
             name,
             color: PALETTE[prev.length % PALETTE.length],
-            target,
+            targets,
         }]);
     };
+    const renameDraft = (id: string, name: string) =>
+        setDrafts(prev => prev.map(d => d.id === id ? { ...d, name } : d));
+    const addMember = (id: string, target: DJDestinationTarget) =>
+        setDrafts(prev => prev.map(d => d.id === id ? { ...d, targets: [...d.targets, target] } : d));
+    const removeMember = (id: string, key: string) =>
+        setDrafts(prev => prev.map(d => d.id === id ? { ...d, targets: d.targets.filter(t => targetKey(t) !== key) } : d));
 
     const unusedSuggestions = suggestions.filter(s =>
         !drafts.some(d => normName(d.name) === normName(s.name)));
 
-    // Every existing playlist, addable as a SINGLE-platform destination —
-    // platform-specific crates are first-class; cross-platform linking is
-    // optional (and the future sync engine builds on these mappings anyway)
+    // Every existing playlist on every platform — the pool that group
+    // members are picked from (and the future sync engine builds on)
     const existingItems = useMemo(() => [
         ...(seratoLib?.crates ?? []).map(c => ({
             key: 's:' + crateFileBase(c), platform: 'Serato', cls: 'text-emerald-400',
             label: c.name, sub: c.path.join(' / '),
-            target: { seratoCrate: crateFileBase(c) } as DJDestination['target'],
+            target: { seratoCrate: crateFileBase(c) } as DJDestinationTarget,
         })),
         ...(rbLib?.crates ?? []).map(c => ({
             key: 'r:' + c.name, platform: 'rekordbox', cls: 'text-sky-400',
             label: c.name, sub: '',
-            target: { rekordboxPlaylist: c.name } as DJDestination['target'],
+            target: { rekordboxPlaylist: c.name } as DJDestinationTarget,
         })),
         ...(itunesLib?.crates ?? []).map(c => ({
             key: 'm:' + c.name, platform: 'Music', cls: 'text-pink-400',
             label: c.name, sub: '',
-            target: { musicPlaylist: c.name } as DJDestination['target'],
+            target: { musicPlaylist: c.name } as DJDestinationTarget,
         })),
         ...spotifyPlaylists.map(p => ({
             key: 'p:' + p.id, platform: 'Spotify', cls: 'text-[#1DB954]',
             label: p.name, sub: '',
-            target: { spotifyPlaylistId: p.id, spotifyPlaylistName: p.name } as DJDestination['target'],
+            target: { spotifyPlaylistId: p.id, spotifyPlaylistName: p.name } as DJDestinationTarget,
         })),
     ], [seratoLib, rbLib, itunesLib, spotifyPlaylists]);
 
-    const filteredItems = existingItems.filter(it =>
-        !pickerQuery.trim() || it.label.toLowerCase().includes(pickerQuery.trim().toLowerCase()));
+    // Per-group member picker: everything not already in the group
+    const pickerItems = (d: DJDestination) => {
+        const memberKeys = new Set(d.targets.map(targetKey));
+        return existingItems
+            .filter(it => !memberKeys.has(it.key))
+            .filter(it => !pickerQuery.trim() || it.label.toLowerCase().includes(pickerQuery.trim().toLowerCase()));
+    };
 
     return (
         <div className="w-full max-w-2xl bg-white/5 border border-white/10 rounded-3xl p-8 max-h-[85vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold mb-1">Destinations</h2>
+            <h2 className="text-2xl font-bold mb-1">Groups</h2>
             <p className="text-gray-400 text-sm mb-6">
-                Each destination is one button in the triage flow — and can feed several platforms at once.
+                Each group is one button in the triage flow. Assigning a track adds it to
+                every playlist in the group — across Serato, rekordbox, Apple Music and Spotify.
             </p>
 
             {/* Cross-platform suggestions */}
             {unusedSuggestions.length > 0 && (
                 <div className="mb-6">
                     <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">
-                        Found on multiple platforms — link them?
+                        Found on multiple platforms — group them?
                     </p>
                     <div className="flex flex-wrap gap-2">
                         {unusedSuggestions.map(s => (
                             <button
                                 key={s.name}
-                                onClick={() => addDraft(s.name, { seratoCrate: s.serato, rekordboxPlaylist: s.rekordbox, musicPlaylist: s.music })}
+                                onClick={() => addDraft(s.name, ([
+                                    s.serato ? { seratoCrate: s.serato } : null,
+                                    s.rekordbox ? { rekordboxPlaylist: s.rekordbox } : null,
+                                    s.music ? { musicPlaylist: s.music } : null,
+                                ] as (DJDestinationTarget | null)[]).filter((t): t is DJDestinationTarget => !!t))}
                                 className="flex items-center space-x-1.5 text-xs bg-violet-500/10 hover:bg-violet-500/25 border border-violet-500/40 text-violet-300 rounded-full px-3 py-1.5 font-bold transition-colors"
                             >
                                 <Plus size={12} />
@@ -686,80 +715,102 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
                 </div>
             )}
 
-            {/* Existing drafts */}
+            {/* Groups */}
             <div className="space-y-2 mb-6">
                 {drafts.map((d, i) => (
-                    <div key={d.id} className="flex items-center space-x-3 bg-white/5 border border-white/10 rounded-xl px-4 py-3">
-                        <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
-                        <span className="font-bold text-sm flex-1 truncate">{i + 1}. {d.name}</span>
-                        <span className="text-[10px] text-gray-500 shrink-0">
-                            {[d.target.seratoCrate && 'Serato', d.target.rekordboxPlaylist && 'rekordbox', d.target.musicPlaylist && 'Music', d.target.spotifyPlaylistId && 'Spotify'].filter(Boolean).join(' · ') || 'no targets!'}
-                        </span>
-                        <button onClick={() => setDrafts(prev => prev.filter(x => x.id !== d.id))} className="text-gray-600 hover:text-red-400 transition-colors">
-                            <Trash2 size={14} />
-                        </button>
+                    <div key={d.id} className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                        <div className="flex items-center space-x-3">
+                            <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
+                            <span className="text-xs text-gray-600 font-bold shrink-0">{i + 1}.</span>
+                            <input
+                                value={d.name}
+                                onChange={e => renameDraft(d.id, e.target.value)}
+                                className="font-bold text-sm flex-1 min-w-0 bg-transparent border-b border-transparent hover:border-white/15 focus:border-violet-500/50 focus:outline-none transition-colors"
+                            />
+                            <button onClick={() => setDrafts(prev => prev.filter(x => x.id !== d.id))} className="text-gray-600 hover:text-red-400 transition-colors shrink-0">
+                                <Trash2 size={14} />
+                            </button>
+                        </div>
+
+                        {/* Members */}
+                        <div className="flex flex-wrap gap-1.5 mt-2.5 ml-6">
+                            {d.targets.map(t => {
+                                const m = memberInfo(t);
+                                return (
+                                    <span key={targetKey(t)} className="flex items-center space-x-1.5 text-[11px] bg-black/30 border border-white/10 rounded-full pl-2.5 pr-1.5 py-1">
+                                        <span className={`font-black uppercase text-[8px] ${m.cls}`}>{m.platform}</span>
+                                        <span className="text-gray-300 max-w-36 truncate">{m.label}</span>
+                                        <button onClick={() => removeMember(d.id, targetKey(t))} className="text-gray-600 hover:text-red-400 transition-colors">
+                                            <X size={11} />
+                                        </button>
+                                    </span>
+                                );
+                            })}
+                            <button
+                                onClick={() => { setPickerFor(p => p === d.id ? null : d.id); setPickerQuery(''); }}
+                                className={`flex items-center space-x-1 text-[11px] rounded-full px-2.5 py-1 border font-bold transition-colors ${pickerFor === d.id ? 'bg-violet-500/20 border-violet-500/40 text-violet-300' : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'}`}
+                            >
+                                <Plus size={11} /> <span>Add playlist</span>
+                            </button>
+                            {d.targets.length === 0 && (
+                                <span className="text-[11px] text-amber-400/80 py-1">empty group — add at least one playlist</span>
+                            )}
+                        </div>
+
+                        {/* Member picker */}
+                        {pickerFor === d.id && (
+                            <div className="mt-2 ml-6 bg-black/30 border border-white/10 rounded-xl overflow-hidden">
+                                <input
+                                    autoFocus
+                                    value={pickerQuery}
+                                    onChange={e => setPickerQuery(e.target.value)}
+                                    placeholder="Filter playlists…"
+                                    className="w-full bg-transparent border-b border-white/10 px-4 py-2 text-sm placeholder:text-gray-600 focus:outline-none"
+                                />
+                                <div className="max-h-40 overflow-y-auto">
+                                    {pickerItems(d).map(it => (
+                                        <button
+                                            key={it.key}
+                                            onClick={() => addMember(d.id, it.target)}
+                                            className="w-full flex items-center justify-between px-4 py-1.5 text-sm hover:bg-white/10 transition-colors text-left"
+                                        >
+                                            <span className="truncate">
+                                                {it.sub && <span className="text-gray-600">{it.sub} / </span>}
+                                                {it.label}
+                                            </span>
+                                            <span className={`text-[9px] font-black uppercase shrink-0 ml-3 ${it.cls}`}>{it.platform}</span>
+                                        </button>
+                                    ))}
+                                    {pickerItems(d).length === 0 && <p className="text-center text-gray-600 text-xs py-3">No matches.</p>}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 ))}
-                {drafts.length === 0 && <p className="text-gray-500 text-sm text-center py-4">No destinations yet — link a suggestion above or create one below.</p>}
+                {drafts.length === 0 && <p className="text-gray-500 text-sm text-center py-4">No groups yet — pick a suggestion above or create one below.</p>}
             </div>
 
-            {/* Existing single-platform playlists */}
-            <div className="mb-6">
-                <button
-                    onClick={() => setShowPicker(p => !p)}
-                    className="text-[10px] uppercase tracking-widest text-gray-500 hover:text-gray-300 font-bold mb-2 transition-colors"
-                >
-                    {showPicker ? '▾' : '▸'} Add an existing playlist (single platform)
-                </button>
-                {showPicker && (
-                    <div className="bg-black/30 border border-white/10 rounded-xl overflow-hidden">
-                        <input
-                            value={pickerQuery}
-                            onChange={e => setPickerQuery(e.target.value)}
-                            placeholder="Filter playlists…"
-                            className="w-full bg-transparent border-b border-white/10 px-4 py-2.5 text-sm placeholder:text-gray-600 focus:outline-none"
-                        />
-                        <div className="max-h-44 overflow-y-auto">
-                            {filteredItems.map(it => (
-                                <button
-                                    key={it.key}
-                                    onClick={() => addDraft(it.label, it.target)}
-                                    className="w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-white/10 transition-colors text-left"
-                                >
-                                    <span className="truncate">
-                                        {it.sub && <span className="text-gray-600">{it.sub} / </span>}
-                                        {it.label}
-                                    </span>
-                                    <span className={`text-[9px] font-black uppercase shrink-0 ml-3 ${it.cls}`}>{it.platform}</span>
-                                </button>
-                            ))}
-                            {filteredItems.length === 0 && <p className="text-center text-gray-600 text-xs py-4">No matches.</p>}
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* New destination: same-named target on every available platform */}
+            {/* New group: fuzzy-matched members, or same-named playlists if none */}
             <div className="flex items-center space-x-2 mb-8">
                 <input
                     value={newName}
                     onChange={e => setNewName(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && newName.trim()) { addDraftFromName(); } }}
-                    placeholder="New destination name (e.g. Peak Time)"
+                    onKeyDown={e => { if (e.key === 'Enter' && newName.trim()) { addGroupFromName(); } }}
+                    placeholder="New group name (e.g. AmexSet)"
                     className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 py-2.5 text-sm placeholder:text-gray-600 focus:outline-none focus:border-violet-500/50 transition-colors"
                 />
                 <button
-                    onClick={addDraftFromName}
+                    onClick={addGroupFromName}
                     disabled={!newName.trim()}
                     className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold disabled:opacity-40 transition-colors"
                 >
-                    Add
+                    Create
                 </button>
             </div>
 
             <button
-                onClick={() => onSave(drafts)}
-                disabled={drafts.length === 0}
+                onClick={() => onSave(drafts.filter(d => d.targets.length > 0))}
+                disabled={!drafts.some(d => d.targets.length > 0)}
                 className="w-full py-3 rounded-full bg-violet-500 hover:bg-violet-400 text-white font-bold transition-all hover:scale-[1.02] disabled:opacity-40"
             >
                 Save & start sorting
@@ -767,19 +818,30 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
         </div>
     );
 
-    function addDraftFromName() {
+    function addGroupFromName() {
         const name = newName.trim();
         if (!name) return;
-        // Default: create/use a same-named playlist on every platform.
-        // Existing Serato crates are matched by name; otherwise a new crate is
-        // created. Apple Music needs no parsed library — AppleScript creates
-        // the playlist directly in Music.app.
-        const existingCrate = seratoLib?.crates.find(c => normName(c.name) === normName(name));
-        addDraft(name, {
-            seratoCrate: seratoLib ? (existingCrate ? crateFileBase(existingCrate) : name) : undefined,
-            rekordboxPlaylist: rbLib ? name : undefined,
-            musicPlaylist: name,
-        });
+        const ng = normName(name);
+        // Fuzzy member suggestions: playlists whose name CONTAINS the group
+        // name (or vice versa) — "AmexSet" picks up "AmexSet Serato" and
+        // "amexset_rb". Remove unwanted members via their chip afterwards.
+        const matches = ng.length > 1
+            ? existingItems.filter(it => {
+                const ni = normName(it.label);
+                return ni.length > 1 && (ni.includes(ng) || ng.includes(ni));
+            })
+            : [];
+        if (matches.length > 0) {
+            addDraft(name, matches.map(m => m.target));
+        } else {
+            // Nothing matches → same-named playlist on every writable platform
+            // (created on apply; Spotify only ever targets existing playlists)
+            const targets: DJDestinationTarget[] = [];
+            if (seratoLib) targets.push({ seratoCrate: name });
+            if (rbLib) targets.push({ rekordboxPlaylist: name });
+            targets.push({ musicPlaylist: name });
+            addDraft(name, targets);
+        }
         setNewName('');
     }
 }

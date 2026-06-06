@@ -96,11 +96,14 @@ export interface DJDestinationTarget {
     spotifyPlaylistName?: string; // display name (id is opaque)
 }
 
+// A destination GROUP: one button in the triage flow, fanning out to any
+// number of member playlists across platforms (e.g. "AmexSet" feeding the
+// Serato crate "AmexSet Serato" + rekordbox "AmexSet" + a Spotify playlist).
 export interface DJDestination {
     id: string;
-    name: string;
+    name: string;               // user-chosen group name
     color: string;              // tailwind-ish hex for the button
-    target: DJDestinationTarget;
+    targets: DJDestinationTarget[]; // members, each one platform playlist
 }
 
 export interface TriageAssignment {
