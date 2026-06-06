@@ -1,9 +1,11 @@
 // --- REKORDBOX XML EXPORT WRITER ---
 // rekordbox has no safe external write path (master.db is encrypted and
-// undocumented), so we generate a DJ_PLAYLISTS xml the user imports once:
-//   rekordbox → Preferences → Advanced → Database → rekordbox xml →
-//   point at this file, then drag the playlists in from the xml tree.
-// Each triage session writes its own timestamped file — never overwrites.
+// undocumented), so we maintain ONE persistent DJ_PLAYLISTS xml that
+// accumulates every triage session. The user points rekordbox at it once
+// (Preferences → Advanced → Database → rekordbox xml) and afterwards just
+// refreshes the "rekordbox xml" tree — same bridge pattern Lexicon uses.
+// Accumulated playlists live in a JSON state file; the xml is regenerated
+// from it on every apply (dedup by file path per playlist).
 
 import fs from 'fs';
 import path from 'path';
@@ -22,14 +24,38 @@ export interface RekordboxTrackRef {
 
 export interface RekordboxExportResult {
     xmlPath: string;
-    playlists: number;
-    tracks: number;
+    playlists: number;      // playlists touched this session
+    tracks: number;         // tracks added this session
+    totalPlaylists: number; // everything in the persistent xml
+    firstExport: boolean;   // true → show the one-time rekordbox setup steps
 }
 
-export const writeRekordboxXml = (
-    outDir: string,
-    playlists: Map<string, RekordboxTrackRef[]>, // playlist name -> tracks
+export const updateRekordboxXml = (
+    stateFile: string,
+    xmlPath: string,
+    newPlaylists: Map<string, RekordboxTrackRef[]>, // playlist name -> tracks
 ): RekordboxExportResult => {
+    const firstExport = !fs.existsSync(xmlPath);
+
+    // Merge this session into the accumulated state (dedup per playlist)
+    let state: Record<string, RekordboxTrackRef[]> = {};
+    try {
+        if (fs.existsSync(stateFile)) state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+    } catch { /* corrupt state — start fresh, xml still regenerates fully */ }
+
+    let added = 0;
+    for (const [name, tracks] of newPlaylists) {
+        const cur = state[name] ?? [];
+        const seen = new Set(cur.map(t => t.path));
+        const fresh = tracks.filter(t => !seen.has(t.path));
+        state[name] = [...cur, ...fresh];
+        added += fresh.length;
+    }
+    fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+
+    // Regenerate the xml from the FULL state
+    const playlists = new Map(Object.entries(state));
     // Collection: unique tracks across all playlists, sequential TrackIDs
     const idByPath = new Map<string, number>();
     const collection: RekordboxTrackRef[] = [];
@@ -67,10 +93,14 @@ ${playlistXml}
 </DJ_PLAYLISTS>
 `;
 
-    const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
-    const xmlPath = path.join(outDir, `liberaudio-triage-${stamp}.xml`);
-    fs.mkdirSync(outDir, { recursive: true });
+    fs.mkdirSync(path.dirname(xmlPath), { recursive: true });
     fs.writeFileSync(xmlPath, xml, 'utf-8');
 
-    return { xmlPath, playlists: playlists.size, tracks: collection.length };
+    return {
+        xmlPath,
+        playlists: newPlaylists.size,
+        tracks: added,
+        totalPlaylists: playlists.size,
+        firstExport,
+    };
 };

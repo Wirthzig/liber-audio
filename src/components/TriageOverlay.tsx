@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, FolderOpen, Loader2, Music2, Pause, Play, Plus, Settings2, SkipForward, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DJDestination, DJTrack, LoadedLibrary, TriageAssignment, TriageResult } from '../electron';
@@ -35,7 +35,7 @@ function Waveform({ src, progress, onSeek }: { src: string; progress: number; on
                 }
                 const top = Math.max(...raw, 0.001);
                 // gamma > 1 EXPANDS contrast between loud and quiet sections
-                if (!cancelled) setPeaks(raw.map(v => Math.pow(v / top, 1.6)));
+                if (!cancelled) setPeaks(raw.map(v => Math.pow(v / top, 1.4)));
             } catch {
                 if (!cancelled) setPeaks([]); // decode failed → placeholder stays
             }
@@ -115,6 +115,10 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
     const [result, setResult] = useState<TriageResult | null>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
 
+    // Embedded album art, cached per file path for back/forward navigation
+    const [artUrl, setArtUrl] = useState<string | null>(null);
+    const artCache = useRef(new Map<string, string | null>());
+
     const track = tracks[index];
     const seratoLib = libraries.find(l => l.library.source === 'serato')?.library;
     const rbLib = libraries.find(l => l.library.source === 'rekordbox')?.library;
@@ -171,6 +175,21 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
         setSelected(new Set(decisions.get(track?.id ?? '') ?? []));
         setProgress(0);
     }, [index, track?.id]);
+
+    useEffect(() => {
+        setArtUrl(null);
+        const p = track?.path;
+        if (!p) return;
+        const cached = artCache.current.get(p);
+        if (cached !== undefined) { setArtUrl(cached); return; }
+        let live = true;
+        window.electronAPI.djGetArtwork(p).then(a => {
+            const url = a ? `data:${a.mime};base64,${a.data}` : null;
+            artCache.current.set(p, url);
+            if (live) setArtUrl(url);
+        }).catch(() => { });
+        return () => { live = false; };
+    }, [track?.id]);
 
     const onLoaded = () => {
         const a = audioRef.current;
@@ -311,6 +330,20 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                     <div className="bg-white/5 border border-white/10 rounded-3xl p-8 shadow-2xl">
                         {/* Track info */}
                         <div className="text-center mb-6">
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.9, y: 8 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                transition={{ duration: 0.3, ease: 'easeOut' }}
+                                className="mx-auto mb-4 w-28 h-28"
+                            >
+                                {artUrl ? (
+                                    <img src={artUrl} alt="" className="w-28 h-28 rounded-2xl object-cover shadow-2xl ring-1 ring-white/10" />
+                                ) : (
+                                    <div className="w-28 h-28 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+                                        <Music2 size={36} className="text-gray-600" />
+                                    </div>
+                                )}
+                            </motion.div>
                             <h2 className="text-2xl font-bold truncate">{track.title}</h2>
                             <p className="text-gray-400 truncate">{track.artist}</p>
                             <div className="flex items-center justify-center space-x-2 mt-2">
@@ -477,9 +510,11 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                                     transition={{ delay: 0.25 + lines.length * 0.08, duration: 0.25 }}
                                     className="text-sky-300"
                                 >
-                                    <p>rekordbox · {result.rekordbox.playlists} {result.rekordbox.playlists === 1 ? 'playlist' : 'playlists'} ({result.rekordbox.tracks} tracks) exported as XML.</p>
+                                    <p>rekordbox · {result.rekordbox.tracks} tracks added to {result.rekordbox.playlists} {result.rekordbox.playlists === 1 ? 'playlist' : 'playlists'} in the LiberAudio xml bridge.</p>
                                     <p className="text-xs text-sky-200/60 mt-1">
-                                        Import: rekordbox → Preferences → Advanced → rekordbox xml → select this file, then drag the playlists in.
+                                        {result.rekordbox.firstExport
+                                            ? 'One-time setup: rekordbox → Preferences → Advanced → Database → rekordbox xml → choose this file. Your LiberAudio playlists then appear in the rekordbox xml tree.'
+                                            : 'Already linked — in rekordbox, refresh the “rekordbox xml” tree (or restart rekordbox) and drag the updated playlists in.'}
                                     </p>
                                     <button
                                         onClick={() => window.electronAPI.djRevealFile(result.rekordbox!.xmlPath)}
@@ -519,6 +554,8 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
 }) {
     const [drafts, setDrafts] = useState<DJDestination[]>(destinations);
     const [newName, setNewName] = useState('');
+    const [pickerQuery, setPickerQuery] = useState('');
+    const [showPicker, setShowPicker] = useState(false);
 
     const addDraft = (name: string, target: DJDestination['target']) => {
         setDrafts(prev => [...prev, {
@@ -531,6 +568,30 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
 
     const unusedSuggestions = suggestions.filter(s =>
         !drafts.some(d => normName(d.name) === normName(s.name)));
+
+    // Every existing playlist, addable as a SINGLE-platform destination —
+    // platform-specific crates are first-class; cross-platform linking is
+    // optional (and the future sync engine builds on these mappings anyway)
+    const existingItems = useMemo(() => [
+        ...(seratoLib?.crates ?? []).map(c => ({
+            key: 's:' + crateFileBase(c), platform: 'Serato', cls: 'text-emerald-400',
+            label: c.name, sub: c.path.join(' / '),
+            target: { seratoCrate: crateFileBase(c) } as DJDestination['target'],
+        })),
+        ...(rbLib?.crates ?? []).map(c => ({
+            key: 'r:' + c.name, platform: 'rekordbox', cls: 'text-sky-400',
+            label: c.name, sub: '',
+            target: { rekordboxPlaylist: c.name } as DJDestination['target'],
+        })),
+        ...(itunesLib?.crates ?? []).map(c => ({
+            key: 'm:' + c.name, platform: 'Music', cls: 'text-pink-400',
+            label: c.name, sub: '',
+            target: { musicPlaylist: c.name } as DJDestination['target'],
+        })),
+    ], [seratoLib, rbLib, itunesLib]);
+
+    const filteredItems = existingItems.filter(it =>
+        !pickerQuery.trim() || it.label.toLowerCase().includes(pickerQuery.trim().toLowerCase()));
 
     return (
         <div className="w-full max-w-2xl bg-white/5 border border-white/10 rounded-3xl p-8 max-h-[85vh] overflow-y-auto">
@@ -580,6 +641,42 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
                 {drafts.length === 0 && <p className="text-gray-500 text-sm text-center py-4">No destinations yet — link a suggestion above or create one below.</p>}
             </div>
 
+            {/* Existing single-platform playlists */}
+            <div className="mb-6">
+                <button
+                    onClick={() => setShowPicker(p => !p)}
+                    className="text-[10px] uppercase tracking-widest text-gray-500 hover:text-gray-300 font-bold mb-2 transition-colors"
+                >
+                    {showPicker ? '▾' : '▸'} Add an existing playlist (single platform)
+                </button>
+                {showPicker && (
+                    <div className="bg-black/30 border border-white/10 rounded-xl overflow-hidden">
+                        <input
+                            value={pickerQuery}
+                            onChange={e => setPickerQuery(e.target.value)}
+                            placeholder="Filter playlists…"
+                            className="w-full bg-transparent border-b border-white/10 px-4 py-2.5 text-sm placeholder:text-gray-600 focus:outline-none"
+                        />
+                        <div className="max-h-44 overflow-y-auto">
+                            {filteredItems.map(it => (
+                                <button
+                                    key={it.key}
+                                    onClick={() => addDraft(it.label, it.target)}
+                                    className="w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-white/10 transition-colors text-left"
+                                >
+                                    <span className="truncate">
+                                        {it.sub && <span className="text-gray-600">{it.sub} / </span>}
+                                        {it.label}
+                                    </span>
+                                    <span className={`text-[9px] font-black uppercase shrink-0 ml-3 ${it.cls}`}>{it.platform}</span>
+                                </button>
+                            ))}
+                            {filteredItems.length === 0 && <p className="text-center text-gray-600 text-xs py-4">No matches.</p>}
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {/* New destination: same-named target on every available platform */}
             <div className="flex items-center space-x-2 mb-8">
                 <input
@@ -611,13 +708,15 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
     function addDraftFromName() {
         const name = newName.trim();
         if (!name) return;
-        // Default: create/use a same-named playlist on every platform we parsed.
-        // Existing Serato crates are matched by name; otherwise a new crate is created.
+        // Default: create/use a same-named playlist on every platform.
+        // Existing Serato crates are matched by name; otherwise a new crate is
+        // created. Apple Music needs no parsed library — AppleScript creates
+        // the playlist directly in Music.app.
         const existingCrate = seratoLib?.crates.find(c => normName(c.name) === normName(name));
         addDraft(name, {
             seratoCrate: seratoLib ? (existingCrate ? crateFileBase(existingCrate) : name) : undefined,
             rekordboxPlaylist: rbLib ? name : undefined,
-            musicPlaylist: itunesLib ? name : undefined,
+            musicPlaylist: name,
         });
         setNewName('');
     }

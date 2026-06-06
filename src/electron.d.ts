@@ -75,6 +75,7 @@ export interface ElectronAPI {
     djScanFolder: (folder: string) => Promise<{ success: boolean; tracks?: (DJTrack & { mtimeMs: number })[]; error?: string }>;
     djApplyTriage: (assignments: TriageAssignment[]) => Promise<TriageResult>;
     djRevealFile: (filePath: string) => Promise<{ success: boolean }>;
+    djGetArtwork: (filePath: string) => Promise<{ mime: string; data: string } | null>;
 }
 
 // --- DJ TRIAGE TYPES ---
@@ -101,7 +102,7 @@ export interface TriageAssignment {
 export interface TriageResult {
     serato: { crate: string; added: number; skipped: number }[];
     music: { playlist: string; added: number; errors: string[] }[];
-    rekordbox: { xmlPath: string; playlists: number; tracks: number } | null;
+    rekordbox: { xmlPath: string; playlists: number; tracks: number; totalPlaylists: number; firstExport: boolean } | null;
     errors: string[];
 }
 

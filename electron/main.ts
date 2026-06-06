@@ -9,9 +9,10 @@ import https from 'https';
 import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readArtwork } from './dj/artwork';
 import { detectLibraries, loadLibraries, LoadRequest } from './dj/index';
 import { addToMusicPlaylist, MusicWriteResult } from './dj/writeMusic';
-import { writeRekordboxXml, RekordboxTrackRef } from './dj/writeRekordbox';
+import { updateRekordboxXml, RekordboxTrackRef } from './dj/writeRekordbox';
 import { appendToSeratoCrate, isSeratoRunning, SeratoWriteResult } from './dj/writeSerato';
 
 // Custom scheme so <audio> can stream local files in dev AND prod
@@ -731,10 +732,15 @@ app.whenReady().then(async () => {
             result.music.push(await addToMusicPlaylist(playlist, paths));
         }
 
-        // rekordbox: timestamped xml export for manual import
+        // rekordbox: ONE persistent xml (~/Music/LiberAudio) accumulating all
+        // sessions — user points rekordbox at it once, then just refreshes
         if (rbPlaylists.size > 0) {
             try {
-                result.rekordbox = writeRekordboxXml(path.join(APP_SUPPORT, 'rekordbox-exports'), rbPlaylists);
+                result.rekordbox = updateRekordboxXml(
+                    path.join(APP_SUPPORT, 'rekordbox-export-state.json'),
+                    path.join(app.getPath('music'), 'LiberAudio', 'rekordbox.xml'),
+                    rbPlaylists,
+                );
             } catch (e: any) {
                 result.errors.push(`rekordbox export: ${e.message}`);
             }
@@ -747,6 +753,12 @@ app.whenReady().then(async () => {
     ipcMain.handle('dj-reveal-file', (_, filePath: string) => {
         shell.showItemInFolder(filePath);
         return { success: true };
+    });
+
+    // Embedded album art for the triage player (base64 → data URL in renderer)
+    ipcMain.handle('dj-get-artwork', (_, filePath: string) => {
+        const art = readArtwork(filePath);
+        return art ? { mime: art.mime, data: art.data.toString('base64') } : null;
     });
 
     // Best-effort launch of rekordbox so the user can re-export their xml.

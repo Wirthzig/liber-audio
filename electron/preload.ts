@@ -19,4 +19,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     djScanFolder: (folder: string) => ipcRenderer.invoke('dj-scan-folder', folder),
     djApplyTriage: (assignments: any[]) => ipcRenderer.invoke('dj-apply-triage', assignments),
     djRevealFile: (filePath: string) => ipcRenderer.invoke('dj-reveal-file', filePath),
+    djGetArtwork: (filePath: string) => ipcRenderer.invoke('dj-get-artwork', filePath),
 });
