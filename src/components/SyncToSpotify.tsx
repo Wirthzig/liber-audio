@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Loader2, ListMusic, RefreshCw, Sparkles, X } from 'lucide-react';
+import { Check, Loader2, ListMusic, Plus, RefreshCw, Sparkles, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { DJTrack, TriageResult } from '../electron';
 import { openSettings } from './SettingsOverlay';
@@ -21,6 +21,8 @@ export function SyncToSpotify({ tracks, crateName }: { tracks: DJTrack[]; crateN
     const [query, setQuery] = useState('');
     const [phase, setPhase] = useState<'pick' | 'syncing' | 'done'>('pick');
     const [result, setResult] = useState<TriageResult | null>(null);
+    const [creating, setCreating] = useState(false);
+    const [newName, setNewName] = useState('');
 
     // Login check + playlist fetch when the panel opens
     useEffect(() => {
@@ -29,6 +31,7 @@ export function SyncToSpotify({ tracks, crateName }: { tracks: DJTrack[]; crateN
         setPhase('pick');
         setResult(null);
         setQuery('');
+        setCreating(false);
         (async () => {
             const token = await window.electronAPI.spotifyGetToken();
             if (!live) return;
@@ -68,11 +71,43 @@ export function SyncToSpotify({ tracks, crateName }: { tracks: DJTrack[]; crateN
         setPhase('done');
     };
 
-    // Same-named playlist floats to the top as the suggested target
-    const suggested = (playlists ?? []).find(p => normName(p.name) === normName(crateName));
-    const filtered = (playlists ?? [])
-        .filter(p => p.id !== suggested?.id)
-        .filter(p => !query.trim() || p.name.toLowerCase().includes(query.trim().toLowerCase()));
+    // Create a fresh (private) playlist and sync straight into it —
+    // creation is additive, so it stays within the never-delete contract
+    const createAndSync = async () => {
+        const name = newName.trim();
+        if (!name) return;
+        setPhase('syncing');
+        try {
+            const token = await window.electronAPI.spotifyGetToken();
+            if (!token) throw new Error('Not logged in');
+            const res = await fetch('https://api.spotify.com/v1/me/playlists', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, public: false, description: 'Created by LiberAudio' }),
+            });
+            if (!res.ok) throw new Error(`Spotify ${res.status}`);
+            const p = await res.json();
+            await sync({ id: p.id, name: p.name, trackCount: 0 });
+        } catch (e: any) {
+            setResult({ serato: [], music: [], rekordbox: null, spotify: [], errors: [`Creating the playlist failed: ${e.message}`] });
+            setPhase('done');
+        }
+    };
+
+    // Alphabetical, with fuzzy name matches for the current crate pinned on
+    // top ("AmexSet" surfaces "AmexSet 2024" and "amexset_live" first)
+    const ncrate = normName(crateName);
+    const matchesQuery = (p: SpotifyPlaylist) =>
+        !query.trim() || p.name.toLowerCase().includes(query.trim().toLowerCase());
+    const isNameMatch = (p: SpotifyPlaylist) => {
+        const np = normName(p.name);
+        return ncrate.length > 1 && np.length > 1 && (np.includes(ncrate) || ncrate.includes(np));
+    };
+    const sorted = [...(playlists ?? [])]
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+        .filter(matchesQuery);
+    const topMatches = sorted.filter(isNameMatch);
+    const rest = sorted.filter(p => !isNameMatch(p));
     const sp = result?.spotify?.[0];
 
     return (
@@ -133,17 +168,49 @@ export function SyncToSpotify({ tracks, crateName }: { tracks: DJTrack[]; crateN
                                             placeholder="Filter your playlists…"
                                             className="w-full bg-transparent border-b border-white/10 px-4 py-2.5 text-sm placeholder:text-gray-600 focus:outline-none"
                                         />
-                                        <div className="max-h-64 overflow-y-auto p-1">
-                                            {suggested && (
+
+                                        {/* Create a new playlist as the sync target */}
+                                        <div className="p-1 border-b border-white/10">
+                                            {!creating ? (
                                                 <button
-                                                    onClick={() => sync(suggested)}
-                                                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-xl bg-[#1DB954]/10 hover:bg-[#1DB954]/20 border border-[#1DB954]/30 transition-colors text-left mb-1"
+                                                    onClick={() => { setCreating(true); setNewName(crateName); }}
+                                                    className="w-full flex items-center space-x-2 px-3 py-2 text-sm rounded-xl hover:bg-white/10 transition-colors text-left text-[#1DB954] font-bold"
                                                 >
-                                                    <span className="truncate text-[#1DB954] font-bold">{suggested.name}</span>
-                                                    <span className="text-[9px] font-black uppercase text-[#1DB954]/60 shrink-0 ml-2">same name</span>
+                                                    <Plus size={13} /> <span>New playlist…</span>
                                                 </button>
+                                            ) : (
+                                                <div className="flex items-center space-x-1.5 p-1">
+                                                    <input
+                                                        autoFocus
+                                                        value={newName}
+                                                        onChange={e => setNewName(e.target.value)}
+                                                        onKeyDown={e => { if (e.key === 'Enter') createAndSync(); }}
+                                                        placeholder="Playlist name"
+                                                        className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-[#1DB954]/50 transition-colors"
+                                                    />
+                                                    <button
+                                                        onClick={createAndSync}
+                                                        disabled={!newName.trim()}
+                                                        className="px-3 py-1.5 rounded-lg bg-[#1DB954]/20 hover:bg-[#1DB954]/30 border border-[#1DB954]/40 text-[#1DB954] text-xs font-bold transition-colors disabled:opacity-40 shrink-0"
+                                                    >
+                                                        Create
+                                                    </button>
+                                                </div>
                                             )}
-                                            {filtered.map(p => (
+                                        </div>
+
+                                        <div className="max-h-64 overflow-y-auto p-1">
+                                            {topMatches.map(p => (
+                                                <button
+                                                    key={p.id}
+                                                    onClick={() => sync(p)}
+                                                    className="w-full flex items-center justify-between px-3 py-2 text-sm rounded-xl bg-[#1DB954]/10 hover:bg-[#1DB954]/20 border border-[#1DB954]/30 transition-colors text-left mb-1"
+                                                >
+                                                    <span className="truncate text-[#1DB954] font-bold">{p.name}</span>
+                                                    <span className="text-[9px] font-black uppercase text-[#1DB954]/60 shrink-0 ml-2">match</span>
+                                                </button>
+                                            ))}
+                                            {rest.map(p => (
                                                 <button
                                                     key={p.id}
                                                     onClick={() => sync(p)}
@@ -156,7 +223,7 @@ export function SyncToSpotify({ tracks, crateName }: { tracks: DJTrack[]; crateN
                                                     <span className="text-[10px] text-gray-600 shrink-0 ml-2">{p.trackCount}</span>
                                                 </button>
                                             ))}
-                                            {!suggested && filtered.length === 0 && (
+                                            {sorted.length === 0 && (
                                                 <p className="text-center text-gray-600 text-xs py-4">No playlists found.</p>
                                             )}
                                         </div>
