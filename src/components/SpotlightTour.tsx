@@ -81,24 +81,25 @@ export function SpotlightTour({ steps, onClose }: { steps: TourStep[]; onClose: 
     const isLast = !steps.slice(index + 1).some(s => document.querySelector(s.target));
     const hasPrev = steps.slice(0, index).some(s => document.querySelector(s.target));
 
-    // No padding on an axis where the target (nearly) fills the screen —
-    // otherwise the highlight spills into neighboring full-height panels
-    const padX = rect.width > window.innerWidth * 0.6 ? 0 : PAD;
-    const padY = rect.height > window.innerHeight * 0.6 ? 0 : PAD;
+    // Screen-scale panels (the start-screen columns) sit flush against each
+    // other — ANY outward padding spills the highlight into the neighbor, so
+    // they get none. Small controls keep the 8px breathing room.
+    const isPanel = rect.width > window.innerWidth * 0.5 || rect.height > window.innerHeight * 0.5;
+    const padX = isPanel ? 0 : PAD;
+    const padY = isPanel ? 0 : PAD;
 
     // Tooltip below the cutout when there's room, else above, else (target
-    // fills the screen vertically, e.g. the start-screen panels) centered
-    // OVER the highlighted element
+    // fills the screen vertically) pinned to the BOTTOM of the screen —
+    // never over the middle, where the panel logos live
     const TIP_H = 180; // estimate incl. margin
     const spaceBelow = window.innerHeight - rect.bottom - padY;
     const spaceAbove = rect.top - padY;
     const tipLeft = Math.min(Math.max(rect.left + rect.width / 2 - TIP_W / 2, 16), window.innerWidth - TIP_W - 16);
-    const tipTop = spaceBelow >= TIP_H
-        ? rect.bottom + padY + 14
-        : spaceAbove >= TIP_H
-            ? undefined
-            : Math.max(16, Math.min(rect.top + rect.height / 2 - TIP_H / 2, window.innerHeight - TIP_H - 16));
-    const tipBottom = tipTop === undefined ? window.innerHeight - rect.top + padY + 14 : undefined;
+    let tipTop: number | undefined;
+    let tipBottom: number | undefined;
+    if (spaceBelow >= TIP_H) tipTop = rect.bottom + padY + 14;
+    else if (spaceAbove >= TIP_H) tipBottom = window.innerHeight - rect.top + padY + 14;
+    else tipBottom = 24;
 
     return (
         <div className="fixed inset-0 z-[70]" style={{ pointerEvents: 'auto' }}>
