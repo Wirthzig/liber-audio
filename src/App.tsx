@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DJLibraryView } from './components/DJLibraryView';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
+import { SettingsOverlay } from './components/SettingsOverlay';
 import { SoundCloudView } from './components/SoundCloudView';
 import { SplitScreen } from './components/SplitScreen';
 import { SpotifyView } from './components/SpotifyView';
@@ -9,7 +10,16 @@ import { YoutubeView } from './components/YoutubeView';
 function App() {
   const [view, setView] = useState<'home' | 'spotify' | 'soundcloud' | 'youtube' | 'djlibrary'>('home');
   const [showOnboarding, setShowOnboarding] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
   const [serverConfig, setServerConfig] = useState<{ release?: { text: string; link?: string }, toast?: { text: string; link?: string } } | null>(null);
+
+  // Settings can be opened from anywhere (gear on the start screen, or the
+  // "set up your own Spotify API" prompt after a rate-limited triage apply)
+  useEffect(() => {
+    const open = () => setShowSettings(true);
+    window.addEventListener('liberaudio:open-settings', open);
+    return () => window.removeEventListener('liberaudio:open-settings', open);
+  }, []);
 
   useEffect(() => {
     // Init backend dependencies on mount (global)
@@ -43,6 +53,9 @@ function App() {
       {view === 'soundcloud' && <SoundCloudView onBack={() => setView('home')} />}
       {view === 'youtube' && <YoutubeView onBack={() => setView('home')} />}
       {view === 'djlibrary' && <DJLibraryView onBack={() => setView('home')} />}
+
+      {/* 3. Settings (above everything, incl. triage) */}
+      {showSettings && <SettingsOverlay onClose={() => setShowSettings(false)} />}
 
     </div>
   );

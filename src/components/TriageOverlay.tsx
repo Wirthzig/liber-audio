@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, FolderOpen, Loader2, Music2, Pause, Play, Plus, Settings2, SkipForward, Trash2, X, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, FolderOpen, Loader2, Music2, Pause, Play, Plus, Settings2, SkipForward, Sparkles, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DJDestination, DJTrack, LoadedLibrary, TriageAssignment, TriageResult } from '../electron';
+import { openSettings } from './SettingsOverlay';
 
 const WAVE_BARS = 120;
 
@@ -540,6 +541,23 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                                 </div>
                             )}
                             {result.errors.map((e, i) => <p key={i} className="text-red-400 text-xs">{e}</p>)}
+                            {result.spotifyLimited && (
+                                <div className="bg-[#1DB954]/10 border border-[#1DB954]/30 rounded-xl px-4 py-3 text-xs text-gray-300 leading-relaxed">
+                                    <p className="font-bold text-[#1DB954] mb-1 flex items-center space-x-1.5">
+                                        <Sparkles size={12} /> <span>Time to set up your own Spotify API</span>
+                                    </p>
+                                    <p className="mb-2">
+                                        The built-in connection is shared and just hit Spotify's limits. Your own free
+                                        API app takes ~2 minutes and unlocks unlimited Spotify integrations in this tool.
+                                    </p>
+                                    <button
+                                        onClick={openSettings}
+                                        className="bg-[#1DB954]/20 hover:bg-[#1DB954]/30 border border-[#1DB954]/40 text-[#1DB954] rounded-lg px-3 py-1.5 font-bold transition-colors"
+                                    >
+                                        Show me how
+                                    </button>
+                                </div>
+                            )}
                         </div>
                         <button onClick={onClose} className="mt-8 w-full py-3 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 font-bold transition-colors">
                             Close

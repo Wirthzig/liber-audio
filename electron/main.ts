@@ -293,8 +293,30 @@ const SPOTIFY_REDIRECT_URI = `http://127.0.0.1:${SPOTIFY_CALLBACK_PORT}/callback
 const SPOTIFY_SCOPES = 'playlist-read-private playlist-read-collaborative user-library-read playlist-modify-public playlist-modify-private';
 const SPOTIFY_AUTH_PATH = path.join(APP_SUPPORT, 'spotify-auth.json');
 
+// BYO credentials: the shared client ID (served by the token server) is
+// capped at 5 allowlisted Spotify users, so users can paste the Client ID of
+// their OWN (free) Spotify developer app instead — stored locally, no secret.
+const SPOTIFY_CLIENT_ID_PATH = path.join(APP_SUPPORT, 'spotify-client-id.json');
+
+const readCustomClientId = (): string | null => {
+    try {
+        if (fs.existsSync(SPOTIFY_CLIENT_ID_PATH)) {
+            const id = JSON.parse(fs.readFileSync(SPOTIFY_CLIENT_ID_PATH, 'utf-8')).clientId;
+            if (typeof id === 'string' && id.trim()) return id.trim();
+        }
+    } catch (e) { console.warn('[Spotify] Failed to read custom client id:', e); }
+    return null;
+};
+
+// Sticky "the shared Spotify connection hit its limits" flag — drives the
+// "set up your own API" prompt in the renderer. Cleared when the user saves
+// their own client ID.
+let spotifyLimited = false;
+
 let cachedClientId: string | null = null;
 const getSpotifyClientId = async (): Promise<string> => {
+    const custom = readCustomClientId();
+    if (custom) return custom;
     if (cachedClientId) return cachedClientId;
     const res = await fetch(`${TOKEN_SERVER}/client-id`);
     if (!res.ok) throw new Error(`client-id fetch failed: ${res.status}`);
@@ -581,6 +603,30 @@ app.whenReady().then(async () => {
         }
     });
 
+    // Settings panel: which connection is in use + the BYO client ID flow
+    ipcMain.handle('spotify-get-config', () => ({
+        customClientId: readCustomClientId(),
+        redirectUri: SPOTIFY_REDIRECT_URI,
+        loggedIn: readSpotifyAuth() !== null,
+        limited: spotifyLimited,
+    }));
+    ipcMain.handle('spotify-set-client-id', (_, clientId: string | null) => {
+        try {
+            // Tokens are bound to the client ID they were issued for — switching
+            // IDs invalidates the session, so drop it and have the user re-login.
+            if (fs.existsSync(SPOTIFY_AUTH_PATH)) fs.unlinkSync(SPOTIFY_AUTH_PATH);
+            if (clientId?.trim()) {
+                fs.writeFileSync(SPOTIFY_CLIENT_ID_PATH, JSON.stringify({ clientId: clientId.trim() }));
+                spotifyLimited = false; // own app, own limits — fresh start
+            } else if (fs.existsSync(SPOTIFY_CLIENT_ID_PATH)) {
+                fs.unlinkSync(SPOTIFY_CLIENT_ID_PATH);
+            }
+            return { success: true };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    });
+
     // --- LIBRARY SCANNER ---
     // Returns audio file basenames (without extension) so the renderer can
     // match "Artist - Title" against scanned playlists and mark them as owned.
@@ -689,6 +735,7 @@ app.whenReady().then(async () => {
             music: [] as MusicWriteResult[],
             rekordbox: null as { xmlPath: string; playlists: number; tracks: number } | null,
             spotify: [] as SpotifyWriteResult[],
+            spotifyLimited: false,
             errors: [] as string[],
         };
 
@@ -768,7 +815,9 @@ app.whenReady().then(async () => {
                         result.spotify.push(await addToSpotifyPlaylist(token, playlistId, name, tracks));
                     } catch (e: any) {
                         if (e instanceof SpotifyLimitedError) {
-                            result.errors.push(`Spotify · ${name}: the shared Spotify connection is ${e.status === 429 ? 'rate-limited' : 'restricted'} right now (${e.status}).`);
+                            if (!readCustomClientId()) spotifyLimited = true; // shared app exhausted → upsell
+                            result.spotifyLimited = true;
+                            result.errors.push(`Spotify · ${name}: the Spotify connection is ${e.status === 429 ? 'rate-limited' : 'restricted'} right now (${e.status}).`);
                         } else {
                             result.errors.push(`Spotify · ${name}: ${e.message}`);
                         }

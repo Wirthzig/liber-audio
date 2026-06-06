@@ -66,6 +66,8 @@ export interface ElectronAPI {
     spotifyLogin: () => Promise<{ success: boolean; error?: string }>;
     spotifyGetToken: () => Promise<string | null>;
     spotifyLogout: () => Promise<{ success: boolean; error?: string }>;
+    spotifyGetConfig: () => Promise<SpotifyConfig>;
+    spotifySetClientId: (clientId: string | null) => Promise<{ success: boolean; error?: string }>;
     djDetectLibraries: () => Promise<{ success: boolean; detected?: DetectedLibraries; error?: string }>;
     djLoadLibraries: (req: { seratoPath?: string; rekordboxXmlPath?: string; itunesXmlPath?: string }) => Promise<{ success: boolean; libraries?: LoadedLibrary[]; errors?: string[]; error?: string }>;
     djSelectXml: (title: string) => Promise<string | null>;
@@ -76,6 +78,13 @@ export interface ElectronAPI {
     djApplyTriage: (assignments: TriageAssignment[]) => Promise<TriageResult>;
     djRevealFile: (filePath: string) => Promise<{ success: boolean }>;
     djGetArtwork: (filePath: string) => Promise<{ mime: string; data: string } | null>;
+}
+
+export interface SpotifyConfig {
+    customClientId: string | null;  // null = using the shared (5-user) connection
+    redirectUri: string;            // what the user must register in their own Spotify app
+    loggedIn: boolean;
+    limited: boolean;               // shared connection hit 403/429 — time for BYO
 }
 
 // --- DJ TRIAGE TYPES ---
@@ -107,6 +116,7 @@ export interface TriageResult {
     music: { playlist: string; added: number; errors: string[] }[];
     rekordbox: { xmlPath: string; playlists: number; tracks: number; totalPlaylists: number; firstExport: boolean } | null;
     spotify: { playlist: string; added: number; skipped: number; unmatched: { artist: string; title: string }[]; errors: string[] }[];
+    spotifyLimited?: boolean;       // hit 403/429 during this apply
     errors: string[];
 }
 

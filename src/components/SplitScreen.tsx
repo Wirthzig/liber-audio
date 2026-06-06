@@ -1,10 +1,11 @@
-import { Coffee, Disc3, FolderCheck, FolderSync, HelpCircle, Loader2, LogIn, Rocket, UserCheck, X } from 'lucide-react';
+import { Coffee, Disc3, FolderCheck, FolderSync, HelpCircle, Loader2, Rocket, Settings, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import MainLogo from '../assets/main-logo.png';
 import SoundcloudLogo from '../assets/soundcloud-logo.png';
 import SpotifyLogo from '../assets/spotify-logo.png';
 import YoutubeLogo from '../assets/youtube-logo.png';
 import { LibraryManager } from '../utils/libraryManager';
+import { openSettings } from './SettingsOverlay';
 
 interface Props {
     onSelectService: (service: 'spotify' | 'soundcloud' | 'youtube' | 'djlibrary') => void;
@@ -14,33 +15,17 @@ interface Props {
 export function SplitScreen({ onSelectService, serverConfig }: Props) {
     const [showOnboarding, setShowOnboarding] = useState(false);
     const [showToast, setShowToast] = useState(false);
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'done'>('idle');
     const [syncCount, setSyncCount] = useState<number | null>(null);
     const [lastAdded, setLastAdded] = useState(0);
 
-    // Restore Spotify session + refresh the library index on startup
+    // Refresh the library index on startup
     useEffect(() => {
-        window.electronAPI.spotifyGetToken?.().then(t => setIsLoggedIn(!!t)).catch(() => { });
         LibraryManager.refresh().then(() => {
             const n = LibraryManager.getIndex().size;
             if (n > 0) setSyncCount(n);
         });
     }, []);
-
-    const handleAccountClick = async () => {
-        if (isLoggingIn) return;
-        if (isLoggedIn) {
-            await window.electronAPI.spotifyLogout();
-            setIsLoggedIn(false);
-            return;
-        }
-        setIsLoggingIn(true);
-        const res = await window.electronAPI.spotifyLogin();
-        setIsLoggingIn(false);
-        if (res.success) setIsLoggedIn(true);
-    };
 
     const handleSyncClick = async () => {
         if (syncState === 'syncing') return;
@@ -114,22 +99,16 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                     <span className="text-sm">Buy me a Coffee</span>
                 </a>
 
-                {/* Spotify Account Button */}
+                {/* Settings Button (Spotify account + own API credentials) */}
                 <div className="relative group">
                     <button
-                        onClick={handleAccountClick}
+                        onClick={openSettings}
                         className="p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] shadow-lg"
                     >
-                        {isLoggingIn
-                            ? <Loader2 size={24} className="stroke-[2.5] animate-spin" />
-                            : isLoggedIn ? <UserCheck size={24} className="stroke-[2.5]" /> : <LogIn size={24} className="stroke-[2.5]" />}
+                        <Settings size={24} className="stroke-[2.5]" />
                     </button>
                     <span className="absolute top-full right-0 mt-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 border border-white/10 text-white px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap pointer-events-none shadow-xl z-50">
-                        {isLoggingIn
-                            ? 'Complete the login in your browser…'
-                            : isLoggedIn
-                                ? 'Spotify: logged in — click to log out'
-                                : 'Login with Spotify — unlocks your private playlists'}
+                        Settings — Spotify login &amp; API credentials
                     </span>
                 </div>
 
