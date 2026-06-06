@@ -172,9 +172,10 @@ export function DJLibraryView({ onBack }: Props) {
             if (req.seratoPath || req.rekordboxXmlPath || req.itunesXmlPath) {
                 const res = await window.electronAPI.djLoadLibraries(req);
                 if (res.success && res.libraries) {
-                    setLibraries(res.libraries);
+                    const libs = res.libraries; // narrow once — survives into the updater callback
+                    setLibraries(libs);
                     setErrors(res.errors || []);
-                    setActiveLib(prev => Math.min(prev, Math.max(res.libraries.length - 1, 0)));
+                    setActiveLib(prev => Math.min(prev, Math.max(libs.length - 1, 0)));
                     setActiveCrate(null);
                 } else {
                     setErrors([res.error || 'Failed to load libraries']);
