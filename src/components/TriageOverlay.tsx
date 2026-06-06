@@ -1,7 +1,93 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Check, FolderOpen, Loader2, Music2, Pause, Play, Plus, Settings2, SkipForward, Trash2, X, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, FolderOpen, Loader2, Music2, Pause, Play, Plus, Settings2, SkipForward, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DJDestination, DJTrack, LoadedLibrary, TriageAssignment, TriageResult } from '../electron';
+
+const WAVE_BARS = 120;
+
+// SoundCloud-style waveform: real peaks decoded from the audio file,
+// mirrored bars, played part tinted, click to seek.
+function Waveform({ src, progress, onSeek }: { src: string; progress: number; onSeek: (ratio: number) => void }) {
+    const [peaks, setPeaks] = useState<number[] | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        setPeaks(null);
+        (async () => {
+            try {
+                const buf = await (await fetch(src)).arrayBuffer();
+                // Mono 16kHz offline context keeps decode memory small
+                const ctx = new OfflineAudioContext(1, 1, 16000);
+                const audio = await ctx.decodeAudioData(buf);
+                const data = audio.getChannelData(0);
+                const block = Math.floor(data.length / WAVE_BARS);
+                const raw: number[] = [];
+                for (let i = 0; i < WAVE_BARS; i++) {
+                    let max = 0;
+                    const start = i * block;
+                    // sample within the block (full scan is wasted effort visually)
+                    for (let j = start; j < start + block; j += 8) {
+                        const v = Math.abs(data[j]);
+                        if (v > max) max = v;
+                    }
+                    raw.push(max);
+                }
+                const top = Math.max(...raw, 0.01);
+                if (!cancelled) setPeaks(raw.map(v => Math.pow(v / top, 0.7))); // soft-compress for fuller look
+            } catch {
+                if (!cancelled) setPeaks([]); // decode failed → placeholder stays
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [src]);
+
+    const seek = (e: React.MouseEvent<HTMLDivElement>) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        onSeek(Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1));
+    };
+
+    const loading = peaks === null;
+    const bars = loading || peaks.length === 0
+        ? Array.from({ length: WAVE_BARS }, (_, i) => 0.25 + 0.2 * Math.abs(Math.sin(i * 0.7)))
+        : peaks;
+
+    return (
+        <div className="flex-1 h-20 flex items-center cursor-pointer select-none" onClick={loading ? undefined : seek}>
+            <div className={`w-full flex items-center space-x-px ${loading ? 'animate-pulse' : ''}`}>
+                {bars.map((p, i) => {
+                    const played = i / bars.length <= progress;
+                    const h = Math.max(p, 0.06);
+                    return (
+                        <motion.div
+                            key={i}
+                            className="flex-1 flex flex-col items-center justify-center"
+                            initial={{ scaleY: 0, opacity: 0 }}
+                            animate={{ scaleY: 1, opacity: 1 }}
+                            transition={{ delay: i * 0.004, duration: 0.3, ease: 'easeOut' }}
+                        >
+                            {/* top bar + smaller mirrored reflection, SoundCloud-style */}
+                            <div
+                                className="w-full rounded-t-sm transition-colors duration-150"
+                                style={{
+                                    height: `${h * 44}px`,
+                                    backgroundColor: loading ? 'rgba(255,255,255,0.08)' : played ? '#A78BFA' : 'rgba(255,255,255,0.18)',
+                                    boxShadow: played && !loading ? '0 0 6px rgba(167,139,250,0.35)' : undefined,
+                                }}
+                            />
+                            <div
+                                className="w-full rounded-b-sm mt-px transition-colors duration-150"
+                                style={{
+                                    height: `${h * 18}px`,
+                                    backgroundColor: loading ? 'rgba(255,255,255,0.04)' : played ? 'rgba(167,139,250,0.35)' : 'rgba(255,255,255,0.07)',
+                                }}
+                            />
+                        </motion.div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
 
 interface Props {
     tracks: DJTrack[];
@@ -96,13 +182,6 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
         const a = audioRef.current;
         if (!a) return;
         if (a.paused) { a.play(); setPlaying(true); } else { a.pause(); setPlaying(false); }
-    };
-
-    const seek = (e: React.MouseEvent<HTMLDivElement>) => {
-        const a = audioRef.current;
-        if (!a || !a.duration) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        a.currentTime = ((e.clientX - rect.left) / rect.width) * a.duration;
     };
 
     // --- Decisions ---
@@ -221,7 +300,7 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                     initial={{ opacity: 0, x: 40, scale: 0.97 }}
                     animate={{ opacity: 1, x: 0, scale: 1 }}
                     transition={{ duration: 0.25, ease: 'easeOut' }}
-                    className="w-full max-w-2xl"
+                    className="w-full max-w-3xl"
                 >
                     <p className="text-center text-xs text-gray-500 uppercase tracking-widest font-bold mb-4">
                         {index + 1} / {tracks.length} · {decidedCount} sorted
@@ -238,17 +317,26 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                             </div>
                         </div>
 
-                        {/* Player */}
-                        <div className="flex items-center space-x-4 mb-8">
-                            <button
+                        {/* Player: SoundCloud-style waveform */}
+                        <div className="flex items-center space-x-5 mb-8">
+                            <motion.button
                                 onClick={togglePlay}
-                                className="p-4 rounded-full bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-300 transition-all hover:scale-105 shrink-0"
+                                whileTap={{ scale: 0.9 }}
+                                animate={playing ? { boxShadow: '0 0 30px rgba(167,139,250,0.45)' } : { boxShadow: '0 0 0px rgba(167,139,250,0)' }}
+                                className="p-5 rounded-full bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-300 transition-colors shrink-0"
                             >
-                                {playing ? <Pause size={22} /> : <Play size={22} className="translate-x-0.5" />}
-                            </button>
-                            <div className="flex-1 h-2 bg-white/10 rounded-full cursor-pointer overflow-hidden" onClick={seek}>
-                                <div className="h-full bg-violet-400 rounded-full transition-[width] duration-200" style={{ width: `${progress * 100}%` }} />
-                            </div>
+                                {playing ? <Pause size={24} /> : <Play size={24} className="translate-x-0.5" />}
+                            </motion.button>
+                            {audioSrc && (
+                                <Waveform
+                                    src={audioSrc}
+                                    progress={progress}
+                                    onSeek={(ratio) => {
+                                        const a = audioRef.current;
+                                        if (a?.duration) a.currentTime = ratio * a.duration;
+                                    }}
+                                />
+                            )}
                         </div>
 
                         {/* Destination buttons */}
@@ -338,39 +426,75 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
             )}
 
             {/* ---------- DONE ---------- */}
-            {mode === 'done' && result && (
-                <div className="w-full max-w-xl bg-white/5 border border-white/10 rounded-3xl p-8">
-                    <h2 className="text-2xl font-bold mb-6 text-center">✅ Applied</h2>
-                    <div className="space-y-3 text-sm">
-                        {result.serato.map(s => (
-                            <p key={s.crate} className="text-emerald-300">Serato · {s.crate.split('%%').pop()}: {s.added} added{s.skipped > 0 && `, ${s.skipped} already there`}</p>
-                        ))}
-                        {result.music.map(m => (
-                            <p key={m.playlist} className={m.errors.length ? 'text-red-400' : 'text-pink-300'}>
-                                Apple Music · {m.playlist}: {m.errors.length ? m.errors[0] : `${m.added} added`}
-                            </p>
-                        ))}
-                        {result.rekordbox && (
-                            <div className="text-sky-300">
-                                <p>rekordbox · {result.rekordbox.playlists} playlists ({result.rekordbox.tracks} tracks) exported as XML.</p>
-                                <p className="text-xs text-sky-200/60 mt-1">
-                                    Import: rekordbox → Preferences → Advanced → rekordbox xml → select this file, then drag the playlists in.
-                                </p>
-                                <button
-                                    onClick={() => window.electronAPI.djRevealFile(result.rekordbox!.xmlPath)}
-                                    className="mt-2 flex items-center space-x-1.5 text-xs bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 rounded-lg px-3 py-1.5 font-bold transition-colors"
+            {mode === 'done' && result && (() => {
+                const lines: { key: string; className: string; node: React.ReactNode }[] = [
+                    ...result.serato.map(s => ({
+                        key: `s-${s.crate}`,
+                        className: 'text-emerald-300',
+                        node: <>Serato · {s.crate.split('%%').pop()}: {s.added} added{s.skipped > 0 && `, ${s.skipped} already there`}</>,
+                    })),
+                    ...result.music.map(m => ({
+                        key: `m-${m.playlist}`,
+                        className: m.errors.length ? 'text-red-400' : 'text-pink-300',
+                        node: <>Apple Music · {m.playlist}: {m.errors.length ? m.errors[0] : `${m.added} added`}</>,
+                    })),
+                ];
+                return (
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.25, ease: 'easeOut' }}
+                        className="w-full max-w-xl bg-white/5 border border-white/10 rounded-3xl p-8"
+                    >
+                        <div className="flex flex-col items-center mb-6">
+                            <motion.div
+                                initial={{ scale: 0, rotate: -30 }}
+                                animate={{ scale: 1, rotate: 0 }}
+                                transition={{ type: 'spring', stiffness: 260, damping: 16, delay: 0.1 }}
+                            >
+                                <CheckCircle2 size={44} className="text-emerald-400 mb-3" />
+                            </motion.div>
+                            <h2 className="text-2xl font-bold">Applied</h2>
+                        </div>
+                        <div className="space-y-3 text-sm">
+                            {lines.map((l, i) => (
+                                <motion.p
+                                    key={l.key}
+                                    initial={{ opacity: 0, x: -12 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: 0.25 + i * 0.08, duration: 0.25 }}
+                                    className={l.className}
                                 >
-                                    <FolderOpen size={12} /> <span>Show XML in Finder</span>
-                                </button>
-                            </div>
-                        )}
-                        {result.errors.map((e, i) => <p key={i} className="text-red-400 text-xs">{e}</p>)}
-                    </div>
-                    <button onClick={onClose} className="mt-8 w-full py-3 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 font-bold transition-colors">
-                        Close
-                    </button>
-                </div>
-            )}
+                                    {l.node}
+                                </motion.p>
+                            ))}
+                            {result.rekordbox && (
+                                <motion.div
+                                    initial={{ opacity: 0, x: -12 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: 0.25 + lines.length * 0.08, duration: 0.25 }}
+                                    className="text-sky-300"
+                                >
+                                    <p>rekordbox · {result.rekordbox.playlists} {result.rekordbox.playlists === 1 ? 'playlist' : 'playlists'} ({result.rekordbox.tracks} tracks) exported as XML.</p>
+                                    <p className="text-xs text-sky-200/60 mt-1">
+                                        Import: rekordbox → Preferences → Advanced → rekordbox xml → select this file, then drag the playlists in.
+                                    </p>
+                                    <button
+                                        onClick={() => window.electronAPI.djRevealFile(result.rekordbox!.xmlPath)}
+                                        className="mt-2 flex items-center space-x-1.5 text-xs bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 rounded-lg px-3 py-1.5 font-bold transition-colors"
+                                    >
+                                        <FolderOpen size={12} /> <span>Show XML in Finder</span>
+                                    </button>
+                                </motion.div>
+                            )}
+                            {result.errors.map((e, i) => <p key={i} className="text-red-400 text-xs">{e}</p>)}
+                        </div>
+                        <button onClick={onClose} className="mt-8 w-full py-3 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 font-bold transition-colors">
+                            Close
+                        </button>
+                    </motion.div>
+                );
+            })()}
 
             {mode === 'triage' && !track && (
                 <div className="text-center text-gray-400">

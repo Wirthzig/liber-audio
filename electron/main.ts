@@ -17,7 +17,8 @@ import { appendToSeratoCrate, isSeratoRunning, SeratoWriteResult } from './dj/wr
 // Custom scheme so <audio> can stream local files in dev AND prod
 // (plain file:// is blocked by web security when the page is http://localhost)
 protocol.registerSchemesAsPrivileged([
-    { scheme: 'liberaudio', privileges: { secure: true, stream: true, supportFetchAPI: false } },
+    // supportFetchAPI: the renderer fetches audio bytes to decode waveforms
+    { scheme: 'liberaudio', privileges: { secure: true, stream: true, supportFetchAPI: true } },
 ]);
 
 const __filename = fileURLToPath(import.meta.url);
@@ -363,10 +364,15 @@ const spotifyLogin = (): Promise<{ success: boolean; error?: string }> => {
                 const returnedState = reqUrl.searchParams.get('state');
                 const error = reqUrl.searchParams.get('error');
 
+                // Clean inline-SVG status icon — no emoji
+                const okIcon = '<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#1DB954" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>';
+                const failIcon = '<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>';
                 res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-                res.end('<html><head><meta charset="utf-8"></head><body style="font-family:sans-serif;background:#000;color:#1DB954;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><h1>' +
-                    (code ? '✅ Logged in!<br><span style="font-size:.5em;color:#1DB95499">You can close this tab and return to LiberAudio.</span>' : '❌ Login failed.<br><span style="font-size:.5em;color:#ff444499">You can close this tab and try again.</span>') +
-                    '</h1></body></html>');
+                res.end('<html><head><meta charset="utf-8"></head><body style="font-family:-apple-system,sans-serif;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center"><div style="display:flex;flex-direction:column;align-items:center">' +
+                    (code
+                        ? okIcon + '<h1 style="color:#1DB954;margin:0">Logged in</h1><p style="color:#1DB95499;font-size:14px">You can close this tab and return to LiberAudio.</p>'
+                        : failIcon + '<h1 style="color:#ff4444;margin:0">Login failed</h1><p style="color:#ff444499;font-size:14px">You can close this tab and try again.</p>') +
+                    '</div></body></html>');
 
                 if (error || !code || returnedState !== state) {
                     finish({ success: false, error: error || 'Invalid callback' });

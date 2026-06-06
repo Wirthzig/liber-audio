@@ -128,7 +128,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                         {isLoggingIn
                             ? 'Complete the login in your browser…'
                             : isLoggedIn
-                                ? 'Spotify: logged in ✓ — click to log out'
+                                ? 'Spotify: logged in — click to log out'
                                 : 'Login with Spotify — unlocks your private playlists'}
                     </span>
                 </div>
@@ -174,7 +174,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                             <h1 className="text-3xl font-bold text-white mb-4">Welcome to LiberAudio</h1>
 
                             <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-4 mb-6">
-                                <h3 className="text-red-500 font-bold text-sm uppercase mb-1">⚠️ Legal Disclaimer</h3>
+                                <h3 className="text-red-500 font-bold text-sm uppercase mb-1">Legal Disclaimer</h3>
                                 <p className="text-xs text-red-200/80 leading-relaxed">
                                     This application is a <strong>Proof of Concept for Educational Purposes Only</strong>.
                                     By using this tool, you agree to respect the Terms of Service of all supported platforms.
@@ -183,7 +183,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                             </div>
 
                             <div className="bg-blue-500/10 border border-blue-500/50 rounded-xl p-4 mb-6">
-                                <h3 className="text-blue-400 font-bold text-sm uppercase mb-1">ℹ️ Requirement: Public Playlists</h3>
+                                <h3 className="text-blue-400 font-bold text-sm uppercase mb-1">Requirement: Public Playlists</h3>
                                 <p className="text-xs text-blue-200/80 leading-relaxed">
                                     Please ensure your playlists on Spotify/SoundCloud/YouTube are set to <strong>Public</strong>.
                                     The tool cannot access Private or Collaborative playlists.
