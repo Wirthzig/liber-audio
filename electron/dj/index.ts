@@ -15,6 +15,10 @@ export interface DetectedLibraries {
     rekordboxXml: string | null; // most recent rekordbox.xml export found
     itunesXml: string | null;    // iTunes/Music Library.xml export
     rekordboxInstalled: boolean; // master.db exists → user has rekordbox but maybe no export yet
+    // Staleness check: if the rekordbox DB changed AFTER the xml export, the
+    // export no longer reflects the current library and should be re-done.
+    rekordboxXmlMtimeMs: number | null;
+    rekordboxDbMtimeMs: number | null;
 }
 
 const HOME = os.homedir();
@@ -53,7 +57,21 @@ export const detectLibraries = (): DetectedLibraries => {
 
     const rekordboxInstalled = fs.existsSync(path.join(HOME, 'Library', 'Pioneer', 'rekordbox'));
 
-    return { serato, rekordboxXml, itunesXml, rekordboxInstalled };
+    const mtimeOf = (p: string | null): number | null => {
+        if (!p) return null;
+        try { return fs.statSync(p).mtimeMs; } catch { return null; }
+    };
+    // master.db / master.backup.db mtime tells us when rekordbox last wrote
+    const dbCandidates = ['master.db', 'master.backup.db']
+        .map(f => path.join(HOME, 'Library', 'Pioneer', 'rekordbox', f));
+    const rekordboxDbMtimeMs = dbCandidates.map(mtimeOf).reduce<number | null>(
+        (a, b) => (a !== null && b !== null ? Math.max(a, b) : a ?? b), null);
+
+    return {
+        serato, rekordboxXml, itunesXml, rekordboxInstalled,
+        rekordboxXmlMtimeMs: mtimeOf(rekordboxXml),
+        rekordboxDbMtimeMs,
+    };
 };
 
 export const computeHealth = (lib: DJLibrary): DJLibraryHealth => {

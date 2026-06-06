@@ -592,6 +592,17 @@ app.whenReady().then(async () => {
         }
     });
 
+    // Best-effort launch of rekordbox so the user can re-export their xml.
+    // There is no public API/CLI to trigger the export itself.
+    ipcMain.handle('dj-open-rekordbox', async () => {
+        const tryOpen = (name: string) => new Promise<boolean>(res =>
+            execFile('open', ['-a', name], (err) => res(!err)));
+        for (const name of ['rekordbox', 'rekordbox 7', 'rekordbox 6']) {
+            if (await tryOpen(name)) return { success: true };
+        }
+        return { success: false, error: 'Could not find the rekordbox app' };
+    });
+
     ipcMain.handle('dj-select-xml', async (_, title: string) => {
         const result = await dialog.showOpenDialog({
             properties: ['openFile'],

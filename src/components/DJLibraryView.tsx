@@ -1,29 +1,7 @@
-import { AlertTriangle, ArrowLeft, Disc3, FileQuestion, FolderOpen, Loader2, ListMusic, Music2, RefreshCw } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, Disc3, ExternalLink, FileQuestion, FolderOpen, Loader2, ListMusic, Music2, RefreshCw, Repeat, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DetectedLibraries, DJTrack, LoadedLibrary } from '../electron';
-
-// Counts up to `value` over ~1s with an ease-out curve whenever it changes.
-function CountUp({ value, className }: { value: number; className?: string }) {
-    const [display, setDisplay] = useState(0);
-    const frameRef = useRef(0);
-
-    useEffect(() => {
-        cancelAnimationFrame(frameRef.current);
-        const start = performance.now();
-        const from = 0;
-        const duration = 1000;
-        const tick = (now: number) => {
-            const t = Math.min((now - start) / duration, 1);
-            const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
-            setDisplay(Math.round(from + (value - from) * eased));
-            if (t < 1) frameRef.current = requestAnimationFrame(tick);
-        };
-        frameRef.current = requestAnimationFrame(tick);
-        return () => cancelAnimationFrame(frameRef.current);
-    }, [value]);
-
-    return <p className={className}>{display.toLocaleString()}</p>;
-}
+import type { DetectedLibraries, DJCue, DJTrack, LoadedLibrary } from '../electron';
 
 interface Props {
     onBack: () => void;
@@ -42,6 +20,116 @@ const fmtDuration = (sec?: number): string => {
     return `${m}:${String(s).padStart(2, '0')}`;
 };
 
+// DJ-friendly cue timestamp: m:ss.t
+const fmtCuePos = (ms: number): string => {
+    const m = Math.floor(ms / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    const t = Math.floor((ms % 1000) / 100);
+    return `${m}:${String(s).padStart(2, '0')}.${t}`;
+};
+
+const fmtAgo = (mtimeMs: number): string => {
+    const days = Math.floor((Date.now() - mtimeMs) / 86_400_000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    return `${days} days ago`;
+};
+
+// Counts up to `value` over ~1s with an ease-out curve whenever it changes.
+function CountUp({ value, className }: { value: number; className?: string }) {
+    const [display, setDisplay] = useState(0);
+    const frameRef = useRef(0);
+
+    useEffect(() => {
+        cancelAnimationFrame(frameRef.current);
+        const start = performance.now();
+        const duration = 1000;
+        const tick = (now: number) => {
+            const t = Math.min((now - start) / duration, 1);
+            const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+            setDisplay(Math.round(value * eased));
+            if (t < 1) frameRef.current = requestAnimationFrame(tick);
+        };
+        frameRef.current = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(frameRef.current);
+    }, [value]);
+
+    return <p className={className}>{display.toLocaleString()}</p>;
+}
+
+// Cue dots + animated hover popover listing ALL cues with timestamps.
+function CueDots({ cues }: { cues: DJCue[] }) {
+    const [popover, setPopover] = useState<{ x: number; y: number } | null>(null);
+    const anchorRef = useRef<HTMLSpanElement>(null);
+
+    if (cues.length === 0) return <span className="text-gray-600 text-xs">–</span>;
+
+    const POPOVER_WIDTH = 230;
+    const open = () => {
+        const rect = anchorRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        // Popover sits left of the cue cell; clamp so it never leaves the window
+        // (left edge is computed explicitly — framer-motion owns `transform`)
+        const estHeight = Math.min(cues.length * 30 + 52, 320);
+        setPopover({
+            x: Math.max(rect.left - POPOVER_WIDTH - 8, 8),
+            y: Math.min(rect.top, window.innerHeight - estHeight - 16),
+        });
+    };
+
+    return (
+        <span
+            ref={anchorRef}
+            className="flex items-center space-x-0.5 cursor-default"
+            onMouseEnter={open}
+            onMouseLeave={() => setPopover(null)}
+        >
+            {cues.slice(0, 4).map((c, j) => (
+                <span key={j} className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: c.color || '#888' }} />
+            ))}
+            {cues.length > 4 && <span className="text-[10px] text-gray-500">+{cues.length - 4}</span>}
+
+            <AnimatePresence>
+                {popover && (
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.92, x: 8 }}
+                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                        exit={{ opacity: 0, scale: 0.92, x: 8 }}
+                        transition={{ duration: 0.15, ease: 'easeOut' }}
+                        className="fixed z-50 bg-black/90 backdrop-blur-xl border border-white/15 rounded-xl shadow-2xl p-3 max-h-80 overflow-y-auto"
+                        style={{ left: popover.x, top: popover.y, width: POPOVER_WIDTH }}
+                    >
+                        <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">
+                            {cues.length} {cues.length === 1 ? 'marker' : 'markers'}
+                        </p>
+                        {cues.map((c, j) => (
+                            <motion.div
+                                key={j}
+                                initial={{ opacity: 0, y: 4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.03 * j, duration: 0.15 }}
+                                className="flex items-center space-x-2 py-1"
+                            >
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-white/20" style={{ backgroundColor: c.color || '#888' }} />
+                                {c.type === 'loop'
+                                    ? <Repeat size={11} className="text-gray-400 shrink-0" />
+                                    : <span className="text-[10px] font-black text-gray-400 w-[11px] text-center shrink-0">{c.index >= 0 ? c.index + 1 : 'M'}</span>}
+                                <span className="text-xs tabular-nums text-gray-200 shrink-0">
+                                    {fmtCuePos(c.positionMs)}{c.endMs !== undefined && <span className="text-gray-500"> → {fmtCuePos(c.endMs)}</span>}
+                                </span>
+                                {c.name && <span className="text-xs text-gray-500 truncate">{c.name}</span>}
+                            </motion.div>
+                        ))}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </span>
+    );
+}
+
+type SortKey = 'title' | 'artist' | 'bpm' | 'key' | 'duration' | 'cues';
+type SortDir = 'asc' | 'desc';
+
 export function DJLibraryView({ onBack }: Props) {
     const [loading, setLoading] = useState(true);
     const [detected, setDetected] = useState<DetectedLibraries | null>(null);
@@ -49,6 +137,9 @@ export function DJLibraryView({ onBack }: Props) {
     const [errors, setErrors] = useState<string[]>([]);
     const [activeLib, setActiveLib] = useState(0);
     const [activeCrate, setActiveCrate] = useState<number | null>(null); // null = all tracks
+    const [query, setQuery] = useState('');
+    const [sortKey, setSortKey] = useState<SortKey | null>(null);
+    const [sortDir, setSortDir] = useState<SortDir>('asc');
 
     const loadAll = async (overrides?: { rekordboxXmlPath?: string; itunesXmlPath?: string }) => {
         setLoading(true);
@@ -68,7 +159,7 @@ export function DJLibraryView({ onBack }: Props) {
                 if (res.success && res.libraries) {
                     setLibraries(res.libraries);
                     setErrors(res.errors || []);
-                    setActiveLib(0);
+                    setActiveLib(prev => Math.min(prev, Math.max(res.libraries.length - 1, 0)));
                     setActiveCrate(null);
                 } else {
                     setErrors([res.error || 'Failed to load libraries']);
@@ -90,14 +181,84 @@ export function DJLibraryView({ onBack }: Props) {
     };
 
     const current = libraries[activeLib];
+
+    // rekordbox.xml exports are snapshots — warn when the live DB is newer
+    const xmlStale = !!(detected?.rekordboxXmlMtimeMs && detected?.rekordboxDbMtimeMs
+        && detected.rekordboxDbMtimeMs > detected.rekordboxXmlMtimeMs + 60_000
+        && current?.library.source === 'rekordbox');
+
     const visibleTracks: DJTrack[] = useMemo(() => {
         if (!current) return [];
-        if (activeCrate === null) return current.library.tracks;
-        const crate = current.library.crates[activeCrate];
-        if (!crate) return [];
-        const byId = new Map(current.library.tracks.map(t => [t.id, t]));
-        return crate.trackIds.map(id => byId.get(id)).filter((t): t is DJTrack => !!t);
-    }, [current, activeCrate]);
+        let tracks: DJTrack[];
+        if (activeCrate === null) {
+            tracks = current.library.tracks;
+        } else {
+            const crate = current.library.crates[activeCrate];
+            const byId = new Map(current.library.tracks.map(t => [t.id, t]));
+            tracks = (crate?.trackIds ?? []).map(id => byId.get(id)).filter((t): t is DJTrack => !!t);
+        }
+
+        if (query.trim()) {
+            const q = query.trim().toLowerCase();
+            tracks = tracks.filter(t =>
+                t.title.toLowerCase().includes(q) ||
+                t.artist.toLowerCase().includes(q) ||
+                (t.album?.toLowerCase().includes(q) ?? false) ||
+                (t.key?.toLowerCase() === q)
+            );
+        }
+
+        if (sortKey) {
+            const dir = sortDir === 'asc' ? 1 : -1;
+            // Missing values always sort last, regardless of direction
+            const cmp = (a: DJTrack, b: DJTrack): number => {
+                switch (sortKey) {
+                    case 'title': return a.title.localeCompare(b.title) * dir;
+                    case 'artist': return a.artist.localeCompare(b.artist) * dir;
+                    case 'key': {
+                        if (!a.key && !b.key) return 0;
+                        if (!a.key) return 1;
+                        if (!b.key) return -1;
+                        return a.key.localeCompare(b.key, undefined, { numeric: true }) * dir;
+                    }
+                    case 'bpm': {
+                        if (!a.bpm && !b.bpm) return 0;
+                        if (!a.bpm) return 1;
+                        if (!b.bpm) return -1;
+                        return (a.bpm - b.bpm) * dir;
+                    }
+                    case 'duration': {
+                        if (!a.durationSec && !b.durationSec) return 0;
+                        if (!a.durationSec) return 1;
+                        if (!b.durationSec) return -1;
+                        return (a.durationSec - b.durationSec) * dir;
+                    }
+                    case 'cues': return (a.cues.length - b.cues.length) * dir;
+                }
+            };
+            tracks = [...tracks].sort(cmp);
+        }
+        return tracks;
+    }, [current, activeCrate, query, sortKey, sortDir]);
+
+    const toggleSort = (key: SortKey) => {
+        if (sortKey === key) {
+            setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortKey(key);
+            setSortDir(key === 'bpm' || key === 'cues' ? 'desc' : 'asc'); // BPM/cues: high first feels natural
+        }
+    };
+
+    const SortHeader = ({ label, k }: { label: string; k: SortKey }) => (
+        <button
+            onClick={() => toggleSort(k)}
+            className={`flex items-center space-x-1 uppercase tracking-widest font-bold transition-colors ${sortKey === k ? 'text-violet-300' : 'text-gray-500 hover:text-gray-300'}`}
+        >
+            <span>{label}</span>
+            {sortKey === k && (sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+        </button>
+    );
 
     return (
         <div className="h-screen flex flex-col bg-black text-white">
@@ -156,7 +317,12 @@ export function DJLibraryView({ onBack }: Props) {
             ) : (
                 <div className="flex-1 flex min-h-0 px-8 pb-8 space-x-6">
                     {/* Sidebar: sources + crates */}
-                    <div className="w-80 shrink-0 flex flex-col space-y-4 min-h-0">
+                    <motion.div
+                        initial={{ opacity: 0, x: -16 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.3, ease: 'easeOut' }}
+                        className="w-80 shrink-0 flex flex-col space-y-4 min-h-0"
+                    >
                         {/* Source switcher */}
                         <div className="flex space-x-2">
                             {libraries.map((lib, i) => {
@@ -164,7 +330,7 @@ export function DJLibraryView({ onBack }: Props) {
                                 return (
                                     <button
                                         key={lib.library.source}
-                                        onClick={() => { setActiveLib(i); setActiveCrate(null); }}
+                                        onClick={() => { setActiveLib(i); setActiveCrate(null); setQuery(''); }}
                                         className={`flex-1 px-3 py-2 rounded-xl border text-xs font-bold uppercase tracking-wide transition-all ${i === activeLib ? meta.bg + ' ' + meta.color : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'}`}
                                     >
                                         {meta.label}
@@ -172,6 +338,38 @@ export function DJLibraryView({ onBack }: Props) {
                                 );
                             })}
                         </div>
+
+                        {/* Stale rekordbox export warning */}
+                        <AnimatePresence>
+                            {xmlStale && detected && (
+                                <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    className="overflow-hidden"
+                                >
+                                    <div className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 space-y-2">
+                                        <p className="flex items-start space-x-2">
+                                            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                                            <span>
+                                                Your XML export is from <b>{fmtAgo(detected.rekordboxXmlMtimeMs!)}</b>, but the rekordbox
+                                                library changed <b>{fmtAgo(detected.rekordboxDbMtimeMs!)}</b> — it may be outdated.
+                                            </span>
+                                        </p>
+                                        <p className="text-amber-200/60">
+                                            rekordbox can't be triggered externally: open it and run
+                                            <b> File → Export Collection in xml format</b>, then hit reload here.
+                                        </p>
+                                        <button
+                                            onClick={() => window.electronAPI.djOpenRekordbox()}
+                                            className="flex items-center space-x-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg px-3 py-1.5 font-bold transition-colors"
+                                        >
+                                            <ExternalLink size={12} /> <span>Open rekordbox</span>
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
 
                         {/* Health summary */}
                         {current && (
@@ -232,16 +430,47 @@ export function DJLibraryView({ onBack }: Props) {
                                 To include Apple Music: Music → File → Library → Export Library, then click here to locate the XML.
                             </button>
                         )}
-                    </div>
+                    </motion.div>
 
                     {/* Track table */}
-                    <div className="flex-1 bg-white/5 border border-white/10 rounded-2xl overflow-hidden flex flex-col min-h-0">
-                        <div className="grid grid-cols-[1fr_180px_60px_60px_60px_50px] gap-3 px-4 py-3 border-b border-white/10 text-[10px] uppercase tracking-widest text-gray-500 font-bold shrink-0">
-                            <span>Title</span><span>Artist</span><span>BPM</span><span>Key</span><span>Time</span><span>Cues</span>
+                    <motion.div
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, ease: 'easeOut', delay: 0.08 }}
+                        className="flex-1 bg-white/5 border border-white/10 rounded-2xl overflow-hidden flex flex-col min-h-0"
+                    >
+                        {/* Search bar */}
+                        <div className="px-4 pt-3 pb-2 shrink-0 flex items-center space-x-3">
+                            <div className="relative flex-1 max-w-md">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                                <input
+                                    value={query}
+                                    onChange={e => setQuery(e.target.value)}
+                                    placeholder="Search title, artist, album — or an exact key like 8A"
+                                    className="w-full bg-white/5 border border-white/10 rounded-full pl-9 pr-9 py-2 text-sm placeholder:text-gray-600 focus:outline-none focus:border-violet-500/50 focus:bg-white/10 transition-colors"
+                                />
+                                {query && (
+                                    <button onClick={() => setQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white">
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </div>
+                            <span className="text-xs text-gray-500 tabular-nums shrink-0">
+                                {visibleTracks.length.toLocaleString()} {visibleTracks.length === 1 ? 'track' : 'tracks'}
+                            </span>
+                        </div>
+
+                        <div className="grid grid-cols-[1fr_180px_70px_60px_60px_60px] gap-3 px-4 py-2 border-b border-white/10 text-[10px] shrink-0">
+                            <SortHeader label="Title" k="title" />
+                            <SortHeader label="Artist" k="artist" />
+                            <SortHeader label="BPM" k="bpm" />
+                            <SortHeader label="Key" k="key" />
+                            <SortHeader label="Time" k="duration" />
+                            <SortHeader label="Cues" k="cues" />
                         </div>
                         <div className="flex-1 overflow-y-auto">
                             {visibleTracks.map((t, i) => (
-                                <div key={t.id + i} className="grid grid-cols-[1fr_180px_60px_60px_60px_50px] gap-3 px-4 py-2 text-sm border-b border-white/5 hover:bg-white/5 items-center">
+                                <div key={t.id + i} className="grid grid-cols-[1fr_180px_70px_60px_60px_60px] gap-3 px-4 py-2 text-sm border-b border-white/5 hover:bg-white/5 items-center">
                                     <span className="truncate flex items-center space-x-2">
                                         {t.fileExists === false && (
                                             <span title={`File missing: ${t.path}`}><AlertTriangle size={13} className="text-amber-400 shrink-0" /></span>
@@ -252,19 +481,16 @@ export function DJLibraryView({ onBack }: Props) {
                                     <span className="text-gray-300 tabular-nums">{t.bpm ? Math.round(t.bpm * 10) / 10 : '–'}</span>
                                     <span className="text-gray-300">{t.key || '–'}</span>
                                     <span className="text-gray-400 tabular-nums">{fmtDuration(t.durationSec)}</span>
-                                    <span className="flex items-center space-x-0.5">
-                                        {t.cues.slice(0, 4).map((c, j) => (
-                                            <span key={j} className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: c.color || '#888' }} title={`${c.type} ${c.index >= 0 ? c.index + 1 : '(memory)'} @ ${fmtDuration(c.positionMs / 1000)}`} />
-                                        ))}
-                                        {t.cues.length > 4 && <span className="text-[10px] text-gray-500">+{t.cues.length - 4}</span>}
-                                    </span>
+                                    <CueDots cues={t.cues} />
                                 </div>
                             ))}
                             {visibleTracks.length === 0 && (
-                                <p className="text-center text-gray-500 text-sm py-12">No tracks in this crate.</p>
+                                <p className="text-center text-gray-500 text-sm py-12">
+                                    {query ? `No tracks matching “${query}”.` : 'No tracks in this crate.'}
+                                </p>
                             )}
                         </div>
-                    </div>
+                    </motion.div>
                 </div>
             )}
 

@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     djDetectLibraries: () => ipcRenderer.invoke('dj-detect-libraries'),
     djLoadLibraries: (req: any) => ipcRenderer.invoke('dj-load-libraries', req),
     djSelectXml: (title: string) => ipcRenderer.invoke('dj-select-xml', title),
+    djOpenRekordbox: () => ipcRenderer.invoke('dj-open-rekordbox'),
 });

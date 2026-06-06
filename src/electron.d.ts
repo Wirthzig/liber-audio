@@ -47,6 +47,8 @@ export interface DetectedLibraries {
     rekordboxXml: string | null;
     itunesXml: string | null;
     rekordboxInstalled: boolean;
+    rekordboxXmlMtimeMs: number | null;
+    rekordboxDbMtimeMs: number | null;
 }
 
 export interface LoadedLibrary {
@@ -67,6 +69,7 @@ export interface ElectronAPI {
     djDetectLibraries: () => Promise<{ success: boolean; detected?: DetectedLibraries; error?: string }>;
     djLoadLibraries: (req: { seratoPath?: string; rekordboxXmlPath?: string; itunesXmlPath?: string }) => Promise<{ success: boolean; libraries?: LoadedLibrary[]; errors?: string[]; error?: string }>;
     djSelectXml: (title: string) => Promise<string | null>;
+    djOpenRekordbox: () => Promise<{ success: boolean; error?: string }>;
 }
 
 declare global {
