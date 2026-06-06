@@ -11,6 +11,7 @@
 import fs from 'fs';
 import path from 'path';
 import { DJCrate, DJLibrary, DJTrack } from './model';
+import { readSeratoCues } from './seratoCues';
 
 interface TLVField {
     tag: string;
@@ -142,6 +143,14 @@ export const loadSeratoLibrary = (seratoRoot: string): DJLibrary => {
             } catch (e) {
                 console.warn(`[DJ] Skipping unreadable crate ${file}:`, e);
             }
+        }
+    }
+
+    // Cues/loops live in "Serato Markers2" tags INSIDE each audio file,
+    // not in database V2 — read them per track (cheap header-only reads).
+    for (const track of trackMap.values()) {
+        if (track.path && fs.existsSync(track.path)) {
+            track.cues = readSeratoCues(track.path);
         }
     }
 
