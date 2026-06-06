@@ -10,4 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     spotifyLogin: () => ipcRenderer.invoke('spotify-login'),
     spotifyGetToken: () => ipcRenderer.invoke('spotify-get-token'),
     spotifyLogout: () => ipcRenderer.invoke('spotify-logout'),
+    djDetectLibraries: () => ipcRenderer.invoke('dj-detect-libraries'),
+    djLoadLibraries: (req: any) => ipcRenderer.invoke('dj-load-libraries', req),
+    djSelectXml: (title: string) => ipcRenderer.invoke('dj-select-xml', title),
 });

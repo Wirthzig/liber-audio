@@ -9,6 +9,7 @@ import https from 'https';
 import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { detectLibraries, loadLibraries, LoadRequest } from './dj/index';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -567,6 +568,38 @@ app.whenReady().then(async () => {
             console.error('[Main] Library scan failed:', e);
             return { success: false, error: e.message };
         }
+    });
+
+    // --- DJ LIBRARY READER (Phase 1: read-only) ---
+    // Parses Serato (_Serato_ binary), Rekordbox (xml export) and iTunes/Music
+    // (Library.xml export) into one canonical model. Never writes anything.
+    ipcMain.handle('dj-detect-libraries', () => {
+        try {
+            return { success: true, detected: detectLibraries() };
+        } catch (e: any) {
+            console.error('[DJ] Detection failed:', e);
+            return { success: false, error: e.message };
+        }
+    });
+
+    ipcMain.handle('dj-load-libraries', (_, req: LoadRequest) => {
+        try {
+            const { libraries, errors } = loadLibraries(req);
+            return { success: true, libraries, errors };
+        } catch (e: any) {
+            console.error('[DJ] Load failed:', e);
+            return { success: false, error: e.message };
+        }
+    });
+
+    ipcMain.handle('dj-select-xml', async (_, title: string) => {
+        const result = await dialog.showOpenDialog({
+            properties: ['openFile'],
+            title,
+            message: title, // macOS shows 'message', not 'title'
+            filters: [{ name: 'XML Library Export', extensions: ['xml'] }],
+        });
+        return result.canceled ? null : result.filePaths[0];
     });
 
     // --- GENERIC METADATA SCANNER (SC/YT) ---

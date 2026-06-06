@@ -1,4 +1,4 @@
-import { Coffee, FolderCheck, FolderSync, HelpCircle, Loader2, LogIn, Rocket, UserCheck, X } from 'lucide-react';
+import { Coffee, Disc3, FolderCheck, FolderSync, HelpCircle, Loader2, LogIn, Rocket, UserCheck, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import MainLogo from '../assets/main-logo.png';
 import SoundcloudLogo from '../assets/soundcloud-logo.png';
@@ -7,7 +7,7 @@ import YoutubeLogo from '../assets/youtube-logo.png';
 import { LibraryManager } from '../utils/libraryManager';
 
 interface Props {
-    onSelectService: (service: 'spotify' | 'soundcloud' | 'youtube') => void;
+    onSelectService: (service: 'spotify' | 'soundcloud' | 'youtube' | 'djlibrary') => void;
     serverConfig: { release?: { text: string; link?: string }, toast?: { text: string; link?: string } } | null;
 }
 
@@ -234,13 +234,26 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
 
             {/* YouTube (Right) */}
             <div
-                className="flex-1 bg-[#ff0000] hover:bg-[#ff1a1a] transition-colors cursor-pointer group flex flex-col items-center justify-center relative"
+                className="flex-1 bg-[#ff0000] hover:bg-[#ff1a1a] transition-colors cursor-pointer group flex flex-col items-center justify-center border-r border-white/10 relative"
                 onClick={() => onSelectService('youtube')}
             >
                 <div className="z-10 text-center p-6 flex flex-col items-center">
                     <img src={YoutubeLogo} alt="YouTube" className="w-32 h-32 mb-6 object-contain drop-shadow-2xl group-hover:scale-110 transition-transform duration-300" />
                     <h2 className="text-3xl font-bold text-white tracking-wider uppercase mb-2">YouTube</h2>
                     <p className="text-white/70 text-sm font-bold">Download Playlists & Tracks</p>
+                </div>
+            </div>
+
+            {/* DJ Library (Far Right) */}
+            <div
+                className="flex-1 bg-[#1a1025] hover:bg-[#241536] transition-colors cursor-pointer group flex flex-col items-center justify-center relative overflow-hidden"
+                onClick={() => onSelectService('djlibrary')}
+            >
+                <div className="absolute inset-0 bg-violet-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <div className="z-10 text-center p-6 flex flex-col items-center">
+                    <Disc3 size={96} className="text-violet-400 mb-6 drop-shadow-[0_0_30px_rgba(167,139,250,0.4)] group-hover:scale-110 group-hover:rotate-180 transition-transform duration-700" />
+                    <h2 className="text-3xl font-bold text-violet-400 tracking-wider uppercase mb-2">DJ Library</h2>
+                    <p className="text-gray-500 text-sm group-hover:text-gray-300 transition-colors">Serato · Rekordbox · Apple Music</p>
                 </div>
             </div>
 

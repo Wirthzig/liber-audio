@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { DJLibraryView } from './components/DJLibraryView';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { SoundCloudView } from './components/SoundCloudView';
 import { SplitScreen } from './components/SplitScreen';
@@ -6,7 +7,7 @@ import { SpotifyView } from './components/SpotifyView';
 import { YoutubeView } from './components/YoutubeView';
 
 function App() {
-  const [view, setView] = useState<'home' | 'spotify' | 'soundcloud' | 'youtube'>('home');
+  const [view, setView] = useState<'home' | 'spotify' | 'soundcloud' | 'youtube' | 'djlibrary'>('home');
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [serverConfig, setServerConfig] = useState<{ release?: { text: string; link?: string }, toast?: { text: string; link?: string } } | null>(null);
 
@@ -23,7 +24,7 @@ function App() {
       .catch(e => console.error("Config fetch failed:", e));
   }, []);
 
-  const handleServiceSelect = (service: 'spotify' | 'soundcloud' | 'youtube') => {
+  const handleServiceSelect = (service: 'spotify' | 'soundcloud' | 'youtube' | 'djlibrary') => {
     setView(service);
   };
 
@@ -41,6 +42,7 @@ function App() {
       {view === 'spotify' && <SpotifyView onBack={() => setView('home')} />}
       {view === 'soundcloud' && <SoundCloudView onBack={() => setView('home')} />}
       {view === 'youtube' && <YoutubeView onBack={() => setView('home')} />}
+      {view === 'djlibrary' && <DJLibraryView onBack={() => setView('home')} />}
 
     </div>
   );
