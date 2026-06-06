@@ -21,19 +21,21 @@ function Waveform({ src, progress, onSeek }: { src: string; progress: number; on
                 const audio = await ctx.decodeAudioData(buf);
                 const data = audio.getChannelData(0);
                 const block = Math.floor(data.length / WAVE_BARS);
+                // RMS (energy) per block, NOT peak: limited/compressed masters
+                // peak at ~1.0 everywhere, which renders as a flat brick — RMS
+                // still shows intros, breakdowns and drops.
                 const raw: number[] = [];
                 for (let i = 0; i < WAVE_BARS; i++) {
-                    let max = 0;
+                    let sum = 0;
                     const start = i * block;
-                    // sample within the block (full scan is wasted effort visually)
-                    for (let j = start; j < start + block; j += 8) {
-                        const v = Math.abs(data[j]);
-                        if (v > max) max = v;
+                    for (let j = start; j < start + block; j++) {
+                        sum += data[j] * data[j];
                     }
-                    raw.push(max);
+                    raw.push(Math.sqrt(sum / block));
                 }
-                const top = Math.max(...raw, 0.01);
-                if (!cancelled) setPeaks(raw.map(v => Math.pow(v / top, 0.7))); // soft-compress for fuller look
+                const top = Math.max(...raw, 0.001);
+                // gamma > 1 EXPANDS contrast between loud and quiet sections
+                if (!cancelled) setPeaks(raw.map(v => Math.pow(v / top, 1.6)));
             } catch {
                 if (!cancelled) setPeaks([]); // decode failed → placeholder stays
             }
