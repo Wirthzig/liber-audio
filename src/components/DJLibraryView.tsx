@@ -1,6 +1,29 @@
 import { AlertTriangle, ArrowLeft, Disc3, FileQuestion, FolderOpen, Loader2, ListMusic, Music2, RefreshCw } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DetectedLibraries, DJTrack, LoadedLibrary } from '../electron';
+
+// Counts up to `value` over ~1s with an ease-out curve whenever it changes.
+function CountUp({ value, className }: { value: number; className?: string }) {
+    const [display, setDisplay] = useState(0);
+    const frameRef = useRef(0);
+
+    useEffect(() => {
+        cancelAnimationFrame(frameRef.current);
+        const start = performance.now();
+        const from = 0;
+        const duration = 1000;
+        const tick = (now: number) => {
+            const t = Math.min((now - start) / duration, 1);
+            const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+            setDisplay(Math.round(from + (value - from) * eased));
+            if (t < 1) frameRef.current = requestAnimationFrame(tick);
+        };
+        frameRef.current = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(frameRef.current);
+    }, [value]);
+
+    return <p className={className}>{display.toLocaleString()}</p>;
+}
 
 interface Props {
     onBack: () => void;
@@ -154,19 +177,19 @@ export function DJLibraryView({ onBack }: Props) {
                         {current && (
                             <div className="grid grid-cols-2 gap-2 text-center">
                                 <div className="bg-white/5 border border-white/10 rounded-xl p-3">
-                                    <p className="text-xl font-black">{current.health.trackCount.toLocaleString()}</p>
+                                    <CountUp value={current.health.trackCount} className="text-xl font-black" />
                                     <p className="text-[10px] uppercase tracking-widest text-gray-500">Tracks</p>
                                 </div>
                                 <div className="bg-white/5 border border-white/10 rounded-xl p-3">
-                                    <p className="text-xl font-black">{current.health.crateCount}</p>
+                                    <CountUp value={current.health.crateCount} className="text-xl font-black" />
                                     <p className="text-[10px] uppercase tracking-widest text-gray-500">Crates</p>
                                 </div>
                                 <div className="bg-white/5 border border-white/10 rounded-xl p-3">
-                                    <p className={`text-xl font-black ${current.health.missingFiles > 0 ? 'text-amber-400' : ''}`}>{current.health.missingFiles}</p>
+                                    <CountUp value={current.health.missingFiles} className={`text-xl font-black ${current.health.missingFiles > 0 ? 'text-amber-400' : ''}`} />
                                     <p className="text-[10px] uppercase tracking-widest text-gray-500">Missing files</p>
                                 </div>
                                 <div className="bg-white/5 border border-white/10 rounded-xl p-3">
-                                    <p className="text-xl font-black">{current.health.tracksWithCues}</p>
+                                    <CountUp value={current.health.tracksWithCues} className="text-xl font-black" />
                                     <p className="text-[10px] uppercase tracking-widest text-gray-500">With cues</p>
                                 </div>
                             </div>
