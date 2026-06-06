@@ -81,21 +81,34 @@ export function SpotlightTour({ steps, onClose }: { steps: TourStep[]; onClose: 
     const isLast = !steps.slice(index + 1).some(s => document.querySelector(s.target));
     const hasPrev = steps.slice(0, index).some(s => document.querySelector(s.target));
 
-    // Tooltip below the cutout when there's room, otherwise above; clamped
-    const below = rect.bottom + PAD + 170 < window.innerHeight;
+    // No padding on an axis where the target (nearly) fills the screen —
+    // otherwise the highlight spills into neighboring full-height panels
+    const padX = rect.width > window.innerWidth * 0.6 ? 0 : PAD;
+    const padY = rect.height > window.innerHeight * 0.6 ? 0 : PAD;
+
+    // Tooltip below the cutout when there's room, else above, else (target
+    // fills the screen vertically, e.g. the start-screen panels) centered
+    // OVER the highlighted element
+    const TIP_H = 180; // estimate incl. margin
+    const spaceBelow = window.innerHeight - rect.bottom - padY;
+    const spaceAbove = rect.top - padY;
     const tipLeft = Math.min(Math.max(rect.left + rect.width / 2 - TIP_W / 2, 16), window.innerWidth - TIP_W - 16);
-    const tipTop = below ? rect.bottom + PAD + 14 : undefined;
-    const tipBottom = below ? undefined : window.innerHeight - rect.top + PAD + 14;
+    const tipTop = spaceBelow >= TIP_H
+        ? rect.bottom + padY + 14
+        : spaceAbove >= TIP_H
+            ? undefined
+            : Math.max(16, Math.min(rect.top + rect.height / 2 - TIP_H / 2, window.innerHeight - TIP_H - 16));
+    const tipBottom = tipTop === undefined ? window.innerHeight - rect.top + padY + 14 : undefined;
 
     return (
         <div className="fixed inset-0 z-[70]" style={{ pointerEvents: 'auto' }}>
             {/* Cutout: everything around it is darkened by the box-shadow */}
             <motion.div
                 animate={{
-                    left: rect.left - PAD,
-                    top: rect.top - PAD,
-                    width: rect.width + PAD * 2,
-                    height: rect.height + PAD * 2,
+                    left: rect.left - padX,
+                    top: rect.top - padY,
+                    width: rect.width + padX * 2,
+                    height: rect.height + padY * 2,
                 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                 className="fixed rounded-2xl ring-1 ring-white/40"
@@ -105,7 +118,7 @@ export function SpotlightTour({ steps, onClose }: { steps: TourStep[]; onClose: 
             {/* Tooltip */}
             <motion.div
                 key={index}
-                initial={{ opacity: 0, y: below ? 8 : -8 }}
+                initial={{ opacity: 0, y: tipBottom === undefined ? 8 : -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2 }}
                 className="fixed bg-[#16161d] border border-white/15 rounded-2xl p-5 shadow-2xl"
