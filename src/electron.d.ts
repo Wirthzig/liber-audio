@@ -83,6 +83,8 @@ export interface DJDestinationTarget {
     seratoCrate?: string;       // crate file base name incl. %% hierarchy
     musicPlaylist?: string;
     rekordboxPlaylist?: string;
+    spotifyPlaylistId?: string;   // existing playlist only — triage never creates Spotify playlists
+    spotifyPlaylistName?: string; // display name (id is opaque)
 }
 
 export interface DJDestination {
@@ -96,6 +98,7 @@ export interface TriageAssignment {
     path: string;
     title: string;
     artist: string;
+    durationSec?: number;       // sanity check for Spotify search matching
     targets: DJDestinationTarget[];
 }
 
@@ -103,6 +106,7 @@ export interface TriageResult {
     serato: { crate: string; added: number; skipped: number }[];
     music: { playlist: string; added: number; errors: string[] }[];
     rekordbox: { xmlPath: string; playlists: number; tracks: number; totalPlaylists: number; firstExport: boolean } | null;
+    spotify: { playlist: string; added: number; skipped: number; unmatched: { artist: string; title: string }[]; errors: string[] }[];
     errors: string[];
 }
 

@@ -259,6 +259,7 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                 path: t.path,
                 title: t.title,
                 artist: t.artist,
+                durationSec: t.durationSec,
                 targets: [...destIds].map(id => destById.get(id)?.target).filter((x): x is NonNullable<typeof x> => !!x),
             });
         }
@@ -473,7 +474,15 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                         className: m.errors.length ? 'text-red-400' : 'text-pink-300',
                         node: <>Apple Music · {m.playlist}: {m.errors.length ? m.errors[0] : `${m.added} added`}</>,
                     })),
+                    ...(result.spotify ?? []).map(s => ({
+                        key: `p-${s.playlist}`,
+                        className: s.errors.length ? 'text-red-400' : 'text-[#1DB954]',
+                        node: <>Spotify · {s.playlist}: {s.errors.length
+                            ? s.errors[0]
+                            : `${s.added} added${s.skipped > 0 ? `, ${s.skipped} already there` : ''}${s.unmatched.length > 0 ? ` · ${s.unmatched.length} not found` : ''}`}</>,
+                    })),
                 ];
+                const unmatched = (result.spotify ?? []).flatMap(s => s.unmatched);
                 return (
                     <motion.div
                         initial={{ opacity: 0, scale: 0.95 }}
@@ -524,6 +533,12 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                                     </button>
                                 </motion.div>
                             )}
+                            {unmatched.length > 0 && (
+                                <div className="text-xs text-amber-200/70 bg-amber-500/5 border border-amber-500/20 rounded-xl px-3 py-2">
+                                    <p className="font-bold text-amber-300/90 mb-1">Couldn't find on Spotify (nothing was added for these):</p>
+                                    {unmatched.map((u, i) => <p key={i} className="truncate">{u.artist} – {u.title}</p>)}
+                                </div>
+                            )}
                             {result.errors.map((e, i) => <p key={i} className="text-red-400 text-xs">{e}</p>)}
                         </div>
                         <button onClick={onClose} className="mt-8 w-full py-3 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 font-bold transition-colors">
@@ -556,6 +571,30 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
     const [newName, setNewName] = useState('');
     const [pickerQuery, setPickerQuery] = useState('');
     const [showPicker, setShowPicker] = useState(false);
+    const [spotifyPlaylists, setSpotifyPlaylists] = useState<{ id: string; name: string }[]>([]);
+
+    // The user's own Spotify playlists, addable as destinations — only when
+    // logged in (silently absent otherwise, same as a missing local library)
+    useEffect(() => {
+        let live = true;
+        (async () => {
+            try {
+                const token = await window.electronAPI.spotifyGetToken();
+                if (!token) return;
+                const items: { id: string; name: string }[] = [];
+                let url: string | null = 'https://api.spotify.com/v1/me/playlists?limit=50';
+                while (url && items.length < 400) {
+                    const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+                    if (!res.ok) return;
+                    const data: any = await res.json();
+                    for (const p of data.items ?? []) if (p?.id) items.push({ id: p.id, name: p.name });
+                    url = data.next;
+                }
+                if (live) setSpotifyPlaylists(items);
+            } catch { /* offline — picker simply shows no Spotify rows */ }
+        })();
+        return () => { live = false; };
+    }, []);
 
     const addDraft = (name: string, target: DJDestination['target']) => {
         setDrafts(prev => [...prev, {
@@ -588,7 +627,12 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
             label: c.name, sub: '',
             target: { musicPlaylist: c.name } as DJDestination['target'],
         })),
-    ], [seratoLib, rbLib, itunesLib]);
+        ...spotifyPlaylists.map(p => ({
+            key: 'p:' + p.id, platform: 'Spotify', cls: 'text-[#1DB954]',
+            label: p.name, sub: '',
+            target: { spotifyPlaylistId: p.id, spotifyPlaylistName: p.name } as DJDestination['target'],
+        })),
+    ], [seratoLib, rbLib, itunesLib, spotifyPlaylists]);
 
     const filteredItems = existingItems.filter(it =>
         !pickerQuery.trim() || it.label.toLowerCase().includes(pickerQuery.trim().toLowerCase()));
@@ -631,7 +675,7 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
                         <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
                         <span className="font-bold text-sm flex-1 truncate">{i + 1}. {d.name}</span>
                         <span className="text-[10px] text-gray-500 shrink-0">
-                            {[d.target.seratoCrate && 'Serato', d.target.rekordboxPlaylist && 'rekordbox', d.target.musicPlaylist && 'Music'].filter(Boolean).join(' · ') || 'no targets!'}
+                            {[d.target.seratoCrate && 'Serato', d.target.rekordboxPlaylist && 'rekordbox', d.target.musicPlaylist && 'Music', d.target.spotifyPlaylistId && 'Spotify'].filter(Boolean).join(' · ') || 'no targets!'}
                         </span>
                         <button onClick={() => setDrafts(prev => prev.filter(x => x.id !== d.id))} className="text-gray-600 hover:text-red-400 transition-colors">
                             <Trash2 size={14} />

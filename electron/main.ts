@@ -14,6 +14,7 @@ import { detectLibraries, loadLibraries, LoadRequest } from './dj/index';
 import { addToMusicPlaylist, MusicWriteResult } from './dj/writeMusic';
 import { updateRekordboxXml, RekordboxTrackRef } from './dj/writeRekordbox';
 import { appendToSeratoCrate, isSeratoRunning, SeratoWriteResult } from './dj/writeSerato';
+import { addToSpotifyPlaylist, SpotifyLimitedError, SpotifyTrackRef, SpotifyWriteResult } from './dj/writeSpotify';
 
 // Custom scheme so <audio> can stream local files in dev AND prod
 // (plain file:// is blocked by web security when the page is http://localhost)
@@ -672,10 +673,13 @@ app.whenReady().then(async () => {
         path: string;
         title: string;
         artist: string;
+        durationSec?: number;
         targets: {
             seratoCrate?: string;   // crate file base name incl. %% hierarchy
             musicPlaylist?: string;
             rekordboxPlaylist?: string;
+            spotifyPlaylistId?: string;
+            spotifyPlaylistName?: string;
         }[];
     }
 
@@ -684,6 +688,7 @@ app.whenReady().then(async () => {
             serato: [] as SeratoWriteResult[],
             music: [] as MusicWriteResult[],
             rekordbox: null as { xmlPath: string; playlists: number; tracks: number } | null,
+            spotify: [] as SpotifyWriteResult[],
             errors: [] as string[],
         };
 
@@ -691,6 +696,7 @@ app.whenReady().then(async () => {
         const seratoCrates = new Map<string, string[]>();
         const musicPlaylists = new Map<string, string[]>();
         const rbPlaylists = new Map<string, RekordboxTrackRef[]>();
+        const spPlaylists = new Map<string, { name: string; tracks: SpotifyTrackRef[] }>();
         for (const a of assignments) {
             for (const t of a.targets) {
                 if (t.seratoCrate) {
@@ -702,6 +708,11 @@ app.whenReady().then(async () => {
                 if (t.rekordboxPlaylist) {
                     (rbPlaylists.get(t.rekordboxPlaylist) ?? rbPlaylists.set(t.rekordboxPlaylist, []).get(t.rekordboxPlaylist)!)
                         .push({ path: a.path, title: a.title, artist: a.artist });
+                }
+                if (t.spotifyPlaylistId) {
+                    (spPlaylists.get(t.spotifyPlaylistId)
+                        ?? spPlaylists.set(t.spotifyPlaylistId, { name: t.spotifyPlaylistName || t.spotifyPlaylistId, tracks: [] }).get(t.spotifyPlaylistId)!)
+                        .tracks.push({ artist: a.artist, title: a.title, durationSec: a.durationSec });
                 }
             }
         }
@@ -746,7 +757,27 @@ app.whenReady().then(async () => {
             }
         }
 
-        console.log(`[DJ] Triage applied: ${assignments.length} tracks → serato:${result.serato.length} crates, music:${result.music.length} playlists, rb:${result.rekordbox?.playlists ?? 0}`);
+        // Spotify: additive-only (search-match + POST append, never delete)
+        if (spPlaylists.size > 0) {
+            const token = await getSpotifyUserToken();
+            if (!token) {
+                result.errors.push('Spotify: not logged in — log in (top-right on the start screen) and apply again. Other platforms proceeded.');
+            } else {
+                for (const [playlistId, { name, tracks }] of spPlaylists) {
+                    try {
+                        result.spotify.push(await addToSpotifyPlaylist(token, playlistId, name, tracks));
+                    } catch (e: any) {
+                        if (e instanceof SpotifyLimitedError) {
+                            result.errors.push(`Spotify · ${name}: the shared Spotify connection is ${e.status === 429 ? 'rate-limited' : 'restricted'} right now (${e.status}).`);
+                        } else {
+                            result.errors.push(`Spotify · ${name}: ${e.message}`);
+                        }
+                    }
+                }
+            }
+        }
+
+        console.log(`[DJ] Triage applied: ${assignments.length} tracks → serato:${result.serato.length} crates, music:${result.music.length} playlists, rb:${result.rekordbox?.playlists ?? 0}, spotify:${result.spotify.length} playlists`);
         return result;
     });
 
