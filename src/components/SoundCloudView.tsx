@@ -4,6 +4,13 @@ import Logo from '../assets/soundcloud-logo.png';
 import { HistoryManager } from '../utils/historyManager';
 import { LibraryManager } from '../utils/libraryManager';
 import { DOWNLOAD_CONCURRENCY } from '../utils/matching';
+import { SpotlightTour, type TourStep, useTour } from './SpotlightTour';
+
+const SOUNDCLOUD_TOUR: TourStep[] = [
+    { target: '[data-tour="sc-url"]', title: 'Load a link', text: 'Paste any public SoundCloud playlist or track link and hit Scan.' },
+    { target: '[data-tour="sc-download"]', title: 'Download', text: 'Pick an output folder once, then download the selected tracks.' },
+    { target: '[data-tour="sc-tracks"]', title: 'Tracks', text: 'Title and artist are editable before downloading — handy for messy SoundCloud naming. "Select New" skips songs you already own.' },
+];
 
 interface Song {
     id: string;
@@ -143,8 +150,13 @@ export function SoundCloudView({ onBack }: Props) {
         isSelected: s.status !== 'downloaded' && s.status !== 'exists'
     })));
 
+    const tour = useTour('soundcloud');
+
     return (
         <div className="min-h-screen bg-[#ff5500] text-black px-6 pb-6 pt-12 font-sans select-none flex flex-col items-center relative">
+
+            {/* First-visit tour */}
+            {tour.active && <SpotlightTour steps={SOUNDCLOUD_TOUR} onClose={tour.close} />}
 
             {/* Funny Error Overlay */}
             {showErrorOverlay && (
@@ -186,7 +198,7 @@ export function SoundCloudView({ onBack }: Props) {
                 {/* Sidebar (Input) */}
                 <div className="col-span-1 space-y-6">
                     {/* MONOCHROME CONTAINER: Same Orange BG, Black Shadow */}
-                    <div className="bg-[#ff5500] text-black p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] border border-black/5 relative overflow-hidden">
+                    <div className="bg-[#ff5500] text-black p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] border border-black/5 relative overflow-hidden" data-tour="sc-url">
                         <h2 className="text-xs font-black text-black uppercase mb-4 tracking-widest relative z-10">Target URL</h2>
                         <input
                             className="w-full bg-black/10 border-2 border-transparent focus:border-black/20 rounded-xl p-3 mb-4 text-sm font-bold focus:bg-white outline-none transition-all placeholder-black/40 text-black relative z-10"
@@ -202,7 +214,7 @@ export function SoundCloudView({ onBack }: Props) {
                         </button>
                     </div>
 
-                    <div className="bg-[#ff5500] text-black p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] border border-black/5">
+                    <div className="bg-[#ff5500] text-black p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] border border-black/5" data-tour="sc-download">
                         <button onClick={selectFolder} className="w-full mb-4 bg-black/10 hover:bg-black/20 border-2 border-transparent py-3 rounded-xl flex items-center justify-center text-sm transition-colors text-sm font-bold uppercase tracking-wide">
                             <FolderOpen size={18} className="mr-2 stroke-[2.5] shrink-0" />
                             <span className="truncate">{targetFolder ? `Output: ${targetFolder.split('/').pop()}` : 'Choose Folder'}</span>
@@ -223,7 +235,7 @@ export function SoundCloudView({ onBack }: Props) {
                 </div>
 
                 {/* List Container */}
-                <div className="col-span-1 md:col-span-2 bg-[#ff5500] rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] border border-black/5 overflow-hidden flex flex-col h-[600px] relative">
+                <div className="col-span-1 md:col-span-2 bg-[#ff5500] rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] border border-black/5 overflow-hidden flex flex-col h-[600px] relative" data-tour="sc-tracks">
                     <div className="p-6 bg-black/5 border-b border-black/5 flex flex-col gap-4">
                         <div className="flex justify-between items-center">
                             <h2 className="font-black text-lg text-black uppercase tracking-wider">Tracks Found ({songs.length})</h2>

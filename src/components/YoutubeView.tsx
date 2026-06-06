@@ -4,6 +4,13 @@ import Logo from '../assets/youtube-logo.png'; // Re-using existing logo
 import { HistoryManager } from '../utils/historyManager';
 import { LibraryManager } from '../utils/libraryManager';
 import { DOWNLOAD_CONCURRENCY } from '../utils/matching';
+import { SpotlightTour, type TourStep, useTour } from './SpotlightTour';
+
+const YOUTUBE_TOUR: TourStep[] = [
+    { target: '[data-tour="yt-url"]', title: 'Load a link', text: 'Paste any public YouTube video or playlist link and hit Scan.' },
+    { target: '[data-tour="yt-download"]', title: 'Download', text: 'Pick an output folder once, then download the selected videos as audio.' },
+    { target: '[data-tour="yt-tracks"]', title: 'Videos', text: 'Title and artist are editable before downloading — YouTube titles rarely come clean. "Select New" skips what you already own.' },
+];
 
 interface Song {
     id: string;
@@ -140,8 +147,13 @@ export function YoutubeView({ onBack }: Props) {
         isSelected: s.status !== 'downloaded' && s.status !== 'exists'
     })));
 
+    const tour = useTour('youtube');
+
     return (
         <div className="min-h-screen bg-[#ff0000] text-white px-6 pb-6 pt-12 font-sans select-none flex flex-col items-center relative">
+
+            {/* First-visit tour */}
+            {tour.active && <SpotlightTour steps={YOUTUBE_TOUR} onClose={tour.close} />}
 
             {/* Funny Error Overlay */}
             {showErrorOverlay && (
@@ -183,7 +195,7 @@ export function YoutubeView({ onBack }: Props) {
                 {/* Sidebar (Input) */}
                 <div className="col-span-1 space-y-6">
                     {/* MONOCHROME CONTAINER: Red BG, Deep Shadow */}
-                    <div className="bg-[#ff0000] text-white p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] border border-white/10 relative overflow-hidden">
+                    <div className="bg-[#ff0000] text-white p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] border border-white/10 relative overflow-hidden" data-tour="yt-url">
                         <h2 className="text-xs font-black text-white uppercase mb-4 tracking-widest relative z-10">Video URL</h2>
                         <input
                             className="w-full bg-black/20 border-2 border-transparent focus:border-white/40 rounded-xl p-3 mb-4 text-sm font-bold focus:bg-black/40 outline-none transition-all placeholder-white/40 text-white relative z-10 shadow-inner"
@@ -199,7 +211,7 @@ export function YoutubeView({ onBack }: Props) {
                         </button>
                     </div>
 
-                    <div className="bg-[#ff0000] p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] border border-white/10">
+                    <div className="bg-[#ff0000] p-6 rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] border border-white/10" data-tour="yt-download">
                         <button onClick={selectFolder} className="w-full mb-4 bg-black/20 hover:bg-black/30 border-2 border-transparent py-3 rounded-xl flex items-center justify-center text-sm transition-colors text-sm font-bold text-white uppercase tracking-wide">
                             <FolderOpen size={18} className="mr-2 stroke-[2.5] shrink-0" />
                             <span className="truncate">{targetFolder ? `Output: ${targetFolder.split('/').pop()}` : 'Choose Folder'}</span>
@@ -220,7 +232,7 @@ export function YoutubeView({ onBack }: Props) {
                 </div>
 
                 {/* List Container */}
-                <div className="col-span-1 md:col-span-2 bg-[#ff0000] rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden flex flex-col h-[600px] relative">
+                <div className="col-span-1 md:col-span-2 bg-[#ff0000] rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden flex flex-col h-[600px] relative" data-tour="yt-tracks">
                     <div className="p-6 bg-black/10 border-b border-white/5 flex flex-col gap-4">
                         <div className="flex justify-between items-center">
                             <h2 className="font-black text-xl text-white uppercase tracking-wider">Videos Found ({songs.length})</h2>

@@ -6,6 +6,17 @@ import SpotifyLogo from '../assets/spotify-logo.png';
 import YoutubeLogo from '../assets/youtube-logo.png';
 import { LibraryManager } from '../utils/libraryManager';
 import { openSettings } from './SettingsOverlay';
+import { markAllToursSeen, markTourSeen, resetAllTours, SpotlightTour, type TourStep } from './SpotlightTour';
+
+const HOME_TOUR: TourStep[] = [
+    { target: '[data-tour="panel-spotify"]', title: 'Spotify', text: 'Browse your playlists (log in via Settings for private ones) and download tracks in high quality.' },
+    { target: '[data-tour="panel-soundcloud"]', title: 'SoundCloud', text: 'Paste any public SoundCloud playlist or track link and download it.' },
+    { target: '[data-tour="panel-youtube"]', title: 'YouTube', text: 'Same for YouTube — playlists or single videos, converted to audio.' },
+    { target: '[data-tour="panel-djlibrary"]', title: 'DJ Library', text: 'Your Serato, rekordbox and Apple Music libraries in one view — hot cues included. Triage new downloads into crates and playlists, Tinder-style.' },
+    { target: '[data-tour="settings"]', title: 'Settings', text: 'Log into Spotify here, or connect your own Spotify API app for unlimited integrations.' },
+    { target: '[data-tour="sync"]', title: 'Library sync', text: 'Point this at your music folder — songs you already own are marked and never downloaded twice.' },
+    { target: '[data-tour="help"]', title: 'Help', text: 'Reopens the welcome screen — from there you can take this tour again anytime.' },
+];
 
 interface Props {
     onSelectService: (service: 'spotify' | 'soundcloud' | 'youtube' | 'djlibrary') => void;
@@ -14,6 +25,7 @@ interface Props {
 
 export function SplitScreen({ onSelectService, serverConfig }: Props) {
     const [showOnboarding, setShowOnboarding] = useState(false);
+    const [showTour, setShowTour] = useState(false);
     const [showToast, setShowToast] = useState(false);
     const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'done'>('idle');
     const [syncCount, setSyncCount] = useState<number | null>(null);
@@ -56,9 +68,18 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
         }
     }, []);
 
+    // "Show me around" re-arms every view's first-visit tour; "Skip" opts
+    // out of all of them (Help reopens this overlay to change your mind)
+    const startTour = () => {
+        localStorage.setItem('has_seen_onboarding', 'true');
+        setShowOnboarding(false);
+        resetAllTours();
+        setShowTour(true);
+    };
     const dismissOnboarding = () => {
         localStorage.setItem('has_seen_onboarding', 'true');
         setShowOnboarding(false);
+        markAllToursSeen();
     };
 
     return (
@@ -100,7 +121,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                 </a>
 
                 {/* Settings Button (Spotify account + own API credentials) */}
-                <div className="relative group">
+                <div className="relative group" data-tour="settings">
                     <button
                         onClick={openSettings}
                         className="p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] shadow-lg"
@@ -113,7 +134,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                 </div>
 
                 {/* Library Sync Button */}
-                <div className="relative group">
+                <div className="relative group" data-tour="sync">
                     <button
                         onClick={handleSyncClick}
                         className="p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] shadow-lg"
@@ -135,6 +156,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
 
                 {/* Help Button */}
                 <button
+                    data-tour="help"
                     onClick={() => setShowOnboarding(true)}
                     className="p-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] shadow-lg"
                     title="Show Info & Instructions"
@@ -176,12 +198,20 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                                 and Apple Music playlists, with your hot cues and loops in view.
                             </p>
 
-                            <button
-                                onClick={dismissOnboarding}
-                                className="bg-white text-black hover:bg-gray-200 font-bold py-4 px-12 rounded-full text-lg transition-transform active:scale-95 shadow-xl"
-                            >
-                                Get Started
-                            </button>
+                            <div className="flex items-center space-x-3">
+                                <button
+                                    onClick={startTour}
+                                    className="bg-white text-black hover:bg-gray-200 font-bold py-4 px-10 rounded-full text-lg transition-transform active:scale-95 shadow-xl"
+                                >
+                                    Show me around
+                                </button>
+                                <button
+                                    onClick={dismissOnboarding}
+                                    className="bg-white/10 hover:bg-white/20 border border-white/10 text-white font-bold py-4 px-10 rounded-full text-lg transition-transform active:scale-95"
+                                >
+                                    Skip
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -189,6 +219,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
 
             {/* Spotify (Left) */}
             <div
+                data-tour="panel-spotify"
                 className="flex-1 bg-black hover:bg-[#121212] transition-colors cursor-pointer group flex flex-col items-center justify-center border-r border-white/10 relative overflow-hidden"
                 onClick={() => onSelectService('spotify')}
             >
@@ -202,6 +233,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
 
             {/* SoundCloud (Middle) */}
             <div
+                data-tour="panel-soundcloud"
                 className="flex-1 bg-[#ff5500] hover:bg-[#ff6600] transition-colors cursor-pointer group flex flex-col items-center justify-center border-r border-white/10 relative"
                 onClick={() => onSelectService('soundcloud')}
             >
@@ -214,6 +246,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
 
             {/* YouTube (Right) */}
             <div
+                data-tour="panel-youtube"
                 className="flex-1 bg-[#ff0000] hover:bg-[#ff1a1a] transition-colors cursor-pointer group flex flex-col items-center justify-center border-r border-white/10 relative"
                 onClick={() => onSelectService('youtube')}
             >
@@ -226,6 +259,7 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
 
             {/* DJ Library (Far Right) */}
             <div
+                data-tour="panel-djlibrary"
                 className="flex-1 bg-[#1a1025] hover:bg-[#241536] transition-colors cursor-pointer group flex flex-col items-center justify-center relative overflow-hidden"
                 onClick={() => onSelectService('djlibrary')}
             >
@@ -236,6 +270,11 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                     <p className="text-gray-500 text-sm group-hover:text-gray-300 transition-colors">Serato · Rekordbox · Apple Music</p>
                 </div>
             </div>
+
+            {/* Guided tour (after the welcome overlay's "Show me around") */}
+            {showTour && !showOnboarding && (
+                <SpotlightTour steps={HOME_TOUR} onClose={() => { markTourSeen('home'); setShowTour(false); }} />
+            )}
 
             {/* Startup Toast (Dynamic) */}
             {serverConfig?.toast && serverConfig.toast.text !== 'None' && showToast && (

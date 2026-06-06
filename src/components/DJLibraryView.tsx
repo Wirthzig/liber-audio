@@ -2,11 +2,21 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, Disc3, ExternalLink, FileQuestion, FolderOpen, Loader2, ListMusic, Music2, RefreshCw, Repeat, Search, X, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DetectedLibraries, DJCue, DJTrack, LoadedLibrary } from '../electron';
+import { SpotlightTour, type TourStep, useTour } from './SpotlightTour';
 import { TriageOverlay } from './TriageOverlay';
 
 interface Props {
     onBack: () => void;
 }
+
+const DJ_TOUR: TourStep[] = [
+    { target: '[data-tour="dj-sources"]', title: 'Your libraries', text: 'Every DJ library found on this Mac — Serato, rekordbox (XML export) and Apple Music. Switch between them here.' },
+    { target: '[data-tour="dj-health"]', title: 'Library health', text: 'Track and crate counts, files that have gone missing, and how many tracks carry hot cues.' },
+    { target: '[data-tour="dj-crates"]', title: 'Crates & playlists', text: 'Browse the full crate tree of the selected library. Click one to filter the track table.' },
+    { target: '[data-tour="dj-table"]', title: 'Tracks', text: 'Title, BPM, key, and your hot cues/loops read straight from the files. Click a column header to sort.' },
+    { target: '[data-tour="dj-search"]', title: 'Search', text: 'Filter by title, artist or album — or type an exact key like 8A to find harmonic matches.' },
+    { target: '[data-tour="dj-triage"]', title: 'Sort new tracks', text: '"Tinder for new songs": listen to each track and flick it into your crates and playlists — Serato, rekordbox, Apple Music and Spotify in one go.' },
+];
 
 const SOURCE_META = {
     serato: { label: 'Serato', color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/40' },
@@ -273,6 +283,8 @@ export function DJLibraryView({ onBack }: Props) {
         </button>
     );
 
+    const tour = useTour('djlibrary');
+
     return (
         <div className="h-screen flex flex-col bg-black text-white">
             {/* Draggable Top Bar */}
@@ -296,7 +308,7 @@ export function DJLibraryView({ onBack }: Props) {
                 </div>
                 <div className="flex items-center space-x-3" style={{ WebkitAppRegion: 'no-drag' } as any}>
                     {/* Sort new tracks — triage entry point */}
-                    <div className="relative">
+                    <div className="relative" data-tour="dj-triage">
                         <button
                             onClick={() => setSourceMenu(m => !m)}
                             disabled={libraries.length === 0}
@@ -382,7 +394,7 @@ export function DJLibraryView({ onBack }: Props) {
                         className="w-80 shrink-0 flex flex-col space-y-4 min-h-0"
                     >
                         {/* Source switcher */}
-                        <div className="flex space-x-2">
+                        <div className="flex space-x-2" data-tour="dj-sources">
                             {libraries.map((lib, i) => {
                                 const meta = SOURCE_META[lib.library.source];
                                 return (
@@ -431,7 +443,7 @@ export function DJLibraryView({ onBack }: Props) {
 
                         {/* Health summary */}
                         {current && (
-                            <div className="grid grid-cols-2 gap-2 text-center">
+                            <div className="grid grid-cols-2 gap-2 text-center" data-tour="dj-health">
                                 <div className="bg-white/5 border border-white/10 rounded-xl p-3">
                                     <CountUp value={current.health.trackCount} className="text-xl font-black" />
                                     <p className="text-[10px] uppercase tracking-widest text-gray-500">Tracks</p>
@@ -452,7 +464,7 @@ export function DJLibraryView({ onBack }: Props) {
                         )}
 
                         {/* Crate list */}
-                        <div className="flex-1 overflow-y-auto bg-white/5 border border-white/10 rounded-2xl p-2 min-h-0">
+                        <div className="flex-1 overflow-y-auto bg-white/5 border border-white/10 rounded-2xl p-2 min-h-0" data-tour="dj-crates">
                             <button
                                 onClick={() => setActiveCrate(null)}
                                 className={`w-full text-left px-3 py-2 rounded-lg text-sm font-bold flex items-center space-x-2 ${activeCrate === null ? 'bg-violet-500/20 text-violet-300' : 'text-gray-300 hover:bg-white/10'}`}
@@ -492,6 +504,7 @@ export function DJLibraryView({ onBack }: Props) {
 
                     {/* Track table */}
                     <motion.div
+                        data-tour="dj-table"
                         initial={{ opacity: 0, y: 12 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3, ease: 'easeOut', delay: 0.08 }}
@@ -499,7 +512,7 @@ export function DJLibraryView({ onBack }: Props) {
                     >
                         {/* Search bar */}
                         <div className="px-4 pt-3 pb-2 shrink-0 flex items-center space-x-3">
-                            <div className="relative flex-1 max-w-md">
+                            <div className="relative flex-1 max-w-md" data-tour="dj-search">
                                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input
                                     value={query}
@@ -552,6 +565,11 @@ export function DJLibraryView({ onBack }: Props) {
                         </div>
                     </motion.div>
                 </div>
+            )}
+
+            {/* First-visit tour — only once libraries are actually on screen */}
+            {tour.active && !loading && libraries.length > 0 && !triageTracks && (
+                <SpotlightTour steps={DJ_TOUR} onClose={tour.close} />
             )}
 
             {/* Triage overlay */}

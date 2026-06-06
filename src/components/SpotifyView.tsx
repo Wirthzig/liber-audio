@@ -5,6 +5,13 @@ import Logo from '../assets/spotify-logo.png'; // Re-use logo (make sure it look
 import { HistoryManager } from '../utils/historyManager';
 import { LibraryManager } from '../utils/libraryManager';
 import { DOWNLOAD_CONCURRENCY } from '../utils/matching';
+import { SpotlightTour, type TourStep, useTour } from './SpotlightTour';
+
+const SPOTIFY_TOUR: TourStep[] = [
+    { target: '[data-tour="sp-url"]', title: 'Load a playlist', text: 'Paste any public Spotify playlist link and hit Scan. Logged in? The list button opens your own saved playlists — private ones included.' },
+    { target: '[data-tour="sp-download"]', title: 'Download', text: 'Pick an output folder once, then download the selected tracks in high quality.' },
+    { target: '[data-tour="sp-tracks"]', title: 'Tracks', text: 'Everything found in the playlist. Songs you already own are marked, and "Select New" grabs only the ones you\'re missing.' },
+];
 
 interface Song {
     id: string;
@@ -328,8 +335,13 @@ export function SpotifyView({ onBack }: Props) {
         isSelected: s.status !== 'downloaded' && s.status !== 'exists'
     })));
 
+    const tour = useTour('spotify');
+
     return (
         <div className="min-h-screen bg-[#000000] text-[#1DB954] px-6 pb-6 pt-12 font-sans select-none flex flex-col items-center relative">
+
+            {/* First-visit tour */}
+            {tour.active && <SpotlightTour steps={SPOTIFY_TOUR} onClose={tour.close} />}
 
             {/* Funny Error Overlay */}
             {showErrorOverlay && (
@@ -372,7 +384,7 @@ export function SpotifyView({ onBack }: Props) {
                 {/* Sidebar */}
                 <div className="col-span-1 space-y-6">
                     {/* Input Box */}
-                    <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                    <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)]" data-tour="sp-url">
                         <h2 className="text-xs font-black text-[#1DB954] uppercase mb-4 tracking-widest relative z-10">Playlist URL</h2>
                         <input
                             className="w-full bg-black border border-white/10 focus:border-[#1DB954] rounded-xl p-3 mb-4 text-sm font-bold text-[#1DB954] outline-none transition-all placeholder-[#1DB954]/30 shadow-inner"
@@ -439,7 +451,7 @@ export function SpotifyView({ onBack }: Props) {
                     </div>
 
                     {/* Folder & DL Actions */}
-                    <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                    <div className="bg-[#181818] p-6 rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)]" data-tour="sp-download">
                         <button onClick={selectFolder} className="w-full mb-4 bg-black/40 hover:bg-black/60 border border-white/10 text-[#1DB954] py-3 rounded-xl flex items-center justify-center text-sm transition-colors font-bold uppercase tracking-wide">
                             <FolderOpen size={18} className="mr-2 shrink-0" />
                             <span className="truncate">{targetFolder ? `Output: ${targetFolder.split('/').pop()}` : 'Choose Output'}</span>
@@ -460,7 +472,7 @@ export function SpotifyView({ onBack }: Props) {
                 </div>
 
                 {/* List Container */}
-                <div className="col-span-1 md:col-span-2 bg-[#181818] rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)] overflow-hidden flex flex-col h-[600px]">
+                <div className="col-span-1 md:col-span-2 bg-[#181818] rounded-3xl shadow-[0_0_15px_rgba(255,255,255,0.1)] overflow-hidden flex flex-col h-[600px]" data-tour="sp-tracks">
                     <div className="p-6 bg-black/20 border-b border-white/5 flex flex-col gap-4">
                         <div className="flex justify-between items-center">
                             <h2 className="font-black text-xl text-[#1DB954] uppercase tracking-wider">Tracks ({songs.length})</h2>
