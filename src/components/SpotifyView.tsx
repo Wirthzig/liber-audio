@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { AlertCircle, Check, ChevronLeft, Coffee, DownloadCloud, FolderOpen, Loader2, Search, Square } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { AlertCircle, Check, ChevronLeft, Coffee, DownloadCloud, FolderOpen, ListMusic, Loader2, Search, Square, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import Logo from '../assets/spotify-logo.png'; // Re-use logo (make sure it looks good on dark)
 import { HistoryManager } from '../utils/historyManager';
 import { LibraryManager } from '../utils/libraryManager';
@@ -21,6 +21,13 @@ interface Props {
     onBack: () => void;
 }
 
+interface MyPlaylist {
+    id: string;
+    name: string;
+    trackCount: number;
+    imageUrl?: string;
+}
+
 export function SpotifyView({ onBack }: Props) {
     const [isLoading, setIsLoading] = useState(false);
     const [isWakingUp, setIsWakingUp] = useState(false);
@@ -32,6 +39,56 @@ export function SpotifyView({ onBack }: Props) {
     const [targetFolder, setTargetFolder] = useState<string | null>(localStorage.getItem('target_folder'));
     const [isProcessing, setIsProcessing] = useState(false);
     const abortRef = useRef(false);
+
+    // "My Playlists" browser — needs the user's own session (private scope)
+    const [hasUserSession, setHasUserSession] = useState(false);
+    const [showMyPlaylists, setShowMyPlaylists] = useState(false);
+    const [myPlaylists, setMyPlaylists] = useState<MyPlaylist[] | null>(null); // null = not loaded
+    const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+
+    useEffect(() => {
+        window.electronAPI.spotifyGetToken?.().then(t => setHasUserSession(!!t)).catch(() => { });
+    }, []);
+
+    const openMyPlaylists = async () => {
+        if (showMyPlaylists) { setShowMyPlaylists(false); return; }
+        setShowMyPlaylists(true);
+        if (myPlaylists !== null) return; // already loaded this session
+
+        setLoadingPlaylists(true);
+        try {
+            const token = await window.electronAPI.spotifyGetToken();
+            if (!token) { setHasUserSession(false); setShowMyPlaylists(false); return; }
+            const all: MyPlaylist[] = [];
+            let nextUrl: string | null = 'https://api.spotify.com/v1/me/playlists?limit=50';
+            while (nextUrl) {
+                const res: any = await axios.get(nextUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+                for (const p of res.data.items ?? []) {
+                    if (!p?.id) continue;
+                    all.push({
+                        id: p.id,
+                        name: p.name || 'Untitled',
+                        trackCount: p.tracks?.total ?? 0,
+                        imageUrl: p.images?.[p.images.length - 1]?.url, // smallest image
+                    });
+                }
+                nextUrl = res.data.next;
+            }
+            setMyPlaylists(all);
+        } catch (e) {
+            console.error('Failed to load playlists', e);
+            setMyPlaylists([]);
+        } finally {
+            setLoadingPlaylists(false);
+        }
+    };
+
+    const pickMyPlaylist = (p: MyPlaylist) => {
+        const url = `https://open.spotify.com/playlist/${p.id}`;
+        setPlaylistUrl(url);
+        setShowMyPlaylists(false);
+        scanPlaylist(url);
+    };
 
     const getSpotifyToken = async () => {
         // Prefer the user's own session (works for private playlists, no backend wait)
@@ -54,8 +111,8 @@ export function SpotifyView({ onBack }: Props) {
         }
     };
 
-    const scanPlaylist = async () => {
-        // saveCreds(); // No longer needed
+    const scanPlaylist = async (urlOverride?: string) => {
+        const url = urlOverride ?? playlistUrl;
         setIsLoading(true);
         setIsWakingUp(false);
         setShowErrorOverlay(false);
@@ -77,16 +134,16 @@ export function SpotifyView({ onBack }: Props) {
         setStatusMsg('Fetching...');
 
         let id = '';
-        const isTrack = playlistUrl.includes('/track/');
-        const isPlaylist = playlistUrl.includes('/playlist/');
-        const isAlbum = playlistUrl.includes('/album/');
+        const isTrack = url.includes('/track/');
+        const isPlaylist = url.includes('/playlist/');
+        const isAlbum = url.includes('/album/');
 
         if (isTrack) {
-            id = playlistUrl.split('/track/')[1]?.split('?')[0];
+            id = url.split('/track/')[1]?.split('?')[0];
         } else if (isPlaylist) {
-            id = playlistUrl.split('/playlist/')[1]?.split('?')[0];
+            id = url.split('/playlist/')[1]?.split('?')[0];
         } else if (isAlbum) {
-            id = playlistUrl.split('/album/')[1]?.split('?')[0];
+            id = url.split('/album/')[1]?.split('?')[0];
         }
 
         if (!id) {
@@ -278,10 +335,10 @@ export function SpotifyView({ onBack }: Props) {
             {showErrorOverlay && (
                 <div className="absolute inset-0 z-50 backdrop-blur-md flex items-center justify-center p-8">
                     <div className="bg-black/80 border border-red-500/50 rounded-2xl p-8 max-w-lg w-full shadow-2xl relative text-center backdrop-blur-xl">
-                        <h2 className="text-3xl font-black text-red-500 mb-4 uppercase tracking-wide">Whoops! We hit a wall. 🧱</h2>
+                        <h2 className="text-3xl font-black text-red-500 mb-4 uppercase tracking-wide">Whoops! We hit a wall.</h2>
                         <p className="text-gray-300 mb-6 text-lg leading-relaxed">
                             It looks like this playlist is playing hard to get (Private) or doesn't exist.
-                            We aren't hackers, we can only see what's public! 🕵️‍♂️
+                            We aren't hackers, we can only see what's public!
                         </p>
                         <p className="text-sm text-gray-500 mb-8 font-mono">
                             Please check the link and make sure it's Public.
@@ -322,13 +379,63 @@ export function SpotifyView({ onBack }: Props) {
                             placeholder="Paste Link..."
                             value={playlistUrl} onChange={e => setPlaylistUrl(e.target.value)}
                         />
-                        <button
-                            onClick={scanPlaylist}
-                            className="w-full bg-[#1DB954] text-black hover:bg-[#1ed760] font-black py-4 rounded-xl transition-all flex items-center justify-center space-x-2 shadow-lg hover:shadow-[0_0_20px_rgba(29,185,84,0.4)] active:scale-95 uppercase tracking-wider"
-                        >
-                            <Search size={18} className="stroke-[3]" />
-                            <span>SCAN</span>
-                        </button>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => scanPlaylist()}
+                                className="flex-1 bg-[#1DB954] text-black hover:bg-[#1ed760] font-black py-4 rounded-xl transition-all flex items-center justify-center space-x-2 shadow-lg hover:shadow-[0_0_20px_rgba(29,185,84,0.4)] active:scale-95 uppercase tracking-wider"
+                            >
+                                <Search size={18} className="stroke-[3]" />
+                                <span>SCAN</span>
+                            </button>
+                            {hasUserSession && (
+                                <button
+                                    onClick={openMyPlaylists}
+                                    title="Browse your saved playlists"
+                                    className={`px-4 py-4 rounded-xl border font-black transition-all active:scale-95 ${showMyPlaylists ? 'bg-[#1DB954] text-black border-[#1DB954]' : 'bg-black border-[#1DB954]/50 text-[#1DB954] hover:bg-[#1DB954]/10'}`}
+                                >
+                                    <ListMusic size={18} className="stroke-[3]" />
+                                </button>
+                            )}
+                        </div>
+
+                        {/* My playlists browser */}
+                        {showMyPlaylists && (
+                            <div className="mt-4 bg-black border border-[#1DB954]/30 rounded-xl overflow-hidden">
+                                <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#1DB954]/20">
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-[#1DB954]/70">
+                                        Your Playlists{myPlaylists ? ` (${myPlaylists.length})` : ''}
+                                    </span>
+                                    <button onClick={() => setShowMyPlaylists(false)} className="text-[#1DB954]/50 hover:text-[#1DB954] transition-colors">
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                                <div className="max-h-64 overflow-y-auto">
+                                    {loadingPlaylists ? (
+                                        <div className="flex items-center justify-center py-8 text-[#1DB954]/50">
+                                            <Loader2 size={20} className="animate-spin" />
+                                        </div>
+                                    ) : (myPlaylists ?? []).length === 0 ? (
+                                        <p className="text-center text-[#1DB954]/40 text-xs py-6 font-bold">No playlists found.</p>
+                                    ) : (
+                                        myPlaylists!.map(p => (
+                                            <button
+                                                key={p.id}
+                                                onClick={() => pickMyPlaylist(p)}
+                                                className="w-full flex items-center space-x-3 px-4 py-2.5 hover:bg-[#1DB954]/10 transition-colors text-left"
+                                            >
+                                                {p.imageUrl
+                                                    ? <img src={p.imageUrl} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                                                    : <span className="w-8 h-8 rounded bg-[#1DB954]/10 flex items-center justify-center shrink-0"><ListMusic size={14} className="text-[#1DB954]/50" /></span>}
+                                                <span className="flex-1 min-w-0">
+                                                    <span className="block text-sm font-bold text-[#1DB954] truncate">{p.name}</span>
+                                                    <span className="block text-[10px] text-[#1DB954]/50 font-mono">{p.trackCount} tracks</span>
+                                                </span>
+                                            </button>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Folder & DL Actions */}
@@ -381,7 +488,7 @@ export function SpotifyView({ onBack }: Props) {
                                             <p className="text-sm text-[#1DB954]/80 mb-3 leading-relaxed">
                                                 Our free backend server sleeps when inactive. It might take <strong>1-2 minutes</strong> to start up.
                                                 <br /><br />
-                                                If you buy us a coffee, we might be able to afford a server that never sleeps! (Or at least one that naps less). ☕
+                                                If you buy us a coffee, we might be able to afford a server that never sleeps! (Or at least one that naps less.)
                                             </p>
                                             <a
                                                 href="https://ko-fi.com/liberaudio"
