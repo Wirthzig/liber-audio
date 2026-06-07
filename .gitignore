@@ -33,3 +33,6 @@ dist-ssr
 # Downloaded media (test artifacts)
 *.mp4
 __pycache__/
+
+# Private planning docs — never commit (business strategy)
+.planning/
