@@ -96,17 +96,15 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                 style={{ WebkitAppRegion: 'no-drag' } as any}
             >
                 {/* SetBrain promo pill — same translucent style as the other
-                    actions, with a violet shimmer that sweeps across roughly
-                    once a minute to draw the eye toward the demo. */}
+                    actions; routes to the DJ demo. */}
                 <button
                     data-tour="setbrain"
                     onClick={() => onSelectService('djlibrary')}
                     title="Try SetBrain — organize your DJ library"
-                    className="group relative overflow-hidden px-5 py-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-violet-400/30 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(139,92,246,0.45)] shadow-lg font-bold flex items-center space-x-2"
+                    className="px-5 py-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.3)] shadow-lg font-bold flex items-center space-x-2"
                 >
-                    <span className="setbrain-shimmer pointer-events-none absolute inset-0" />
-                    <Disc3 size={20} className="stroke-[2.5] text-violet-300 relative z-10" />
-                    <span className="relative z-10 text-sm uppercase tracking-wide">SetBrain</span>
+                    <Disc3 size={20} className="stroke-[2.5] text-white" />
+                    <span className="text-sm uppercase tracking-wide">SetBrain</span>
                 </button>
 
                 {/* Release Button (Dynamic) */}
