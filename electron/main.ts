@@ -124,14 +124,19 @@ const loadSearchCache = () => {
         }
     } catch (e) { console.warn('[Main] Failed to load search cache:', e); }
 };
+let searchCacheTimer: ReturnType<typeof setTimeout> | null = null;
 const saveSearchCache = () => {
+    if (searchCacheTimer) { clearTimeout(searchCacheTimer); searchCacheTimer = null; }
     try {
         fs.writeFileSync(SEARCH_CACHE_PATH, JSON.stringify(Object.fromEntries(searchCache)));
     } catch (e) { console.warn('[Main] Failed to save search cache:', e); }
 };
 const cacheSearchResult = (key: string, url: string) => {
     searchCache.set(key, url);
-    saveSearchCache();
+    // Debounce: a playlist fires many lookups; rewriting the whole cache file
+    // on every result was synchronous main-thread I/O that grew with the
+    // session. Flush at most once every few seconds instead.
+    if (!searchCacheTimer) searchCacheTimer = setTimeout(saveSearchCache, 3000);
 };
 
 const downloadFile = (url: string, dest: string) => {
@@ -1343,6 +1348,7 @@ autoUpdater.on('update-downloaded', () => {
 app.on('before-quit', () => {
     // Best-effort flush; anything unsent is persisted and goes out next launch
     flushDownloads();
+    if (searchCacheTimer) saveSearchCache(); // flush any debounced cache write
 });
 
 app.on('window-all-closed', () => {
