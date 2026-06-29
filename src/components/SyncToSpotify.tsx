@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Loader2, ListMusic, Plus, RefreshCw, Sparkles, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { DJTrack, TriageResult } from '../electron';
+import { DEMO_LIMITS } from '../demoLimits';
 import { openSettings } from './SettingsOverlay';
 
 // --- SYNC TO SPOTIFY ---
@@ -59,6 +60,7 @@ export function SyncToSpotify({ tracks, crateName }: { tracks: DJTrack[]; crateN
         setPhase('syncing');
         const assignments = tracks
             .filter(t => t.title)
+            .slice(0, DEMO_LIMITS.syncTracksPerPush) // demo: cap tracks per push
             .map(t => ({
                 path: t.path ?? '',
                 title: t.title,
@@ -133,7 +135,7 @@ export function SyncToSpotify({ tracks, crateName }: { tracks: DJTrack[]; crateN
                     >
                         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                             <span className="text-xs font-bold truncate">
-                                {phase === 'done' ? 'Synced' : <>Sync <span className="text-[#1DB954]">{crateName}</span> ({tracks.length})</>}
+                                {phase === 'done' ? 'Synced' : <>Sync <span className="text-[#1DB954]">{crateName}</span> ({Math.min(tracks.length, DEMO_LIMITS.syncTracksPerPush)}{tracks.length > DEMO_LIMITS.syncTracksPerPush ? ` of ${tracks.length}` : ''})</>}
                             </span>
                             <button onClick={() => setOpen(false)} className="text-gray-500 hover:text-white transition-colors shrink-0 ml-2">
                                 <X size={14} />
@@ -169,35 +171,48 @@ export function SyncToSpotify({ tracks, crateName }: { tracks: DJTrack[]; crateN
                                             className="w-full bg-transparent border-b border-white/10 px-4 py-2.5 text-sm placeholder:text-gray-600 focus:outline-none"
                                         />
 
-                                        {/* Create a new playlist as the sync target */}
-                                        <div className="p-1 border-b border-white/10">
-                                            {!creating ? (
-                                                <button
-                                                    onClick={() => { setCreating(true); setNewName(crateName); }}
-                                                    className="w-full flex items-center space-x-2 px-3 py-2 text-sm rounded-xl hover:bg-white/10 transition-colors text-left text-[#1DB954] font-bold"
-                                                >
-                                                    <Plus size={13} /> <span>New playlist…</span>
-                                                </button>
-                                            ) : (
-                                                <div className="flex items-center space-x-1.5 p-1">
-                                                    <input
-                                                        autoFocus
-                                                        value={newName}
-                                                        onChange={e => setNewName(e.target.value)}
-                                                        onKeyDown={e => { if (e.key === 'Enter') createAndSync(); }}
-                                                        placeholder="Playlist name"
-                                                        className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-[#1DB954]/50 transition-colors"
-                                                    />
+                                        {/* Demo: pushes are capped; creating a new playlist is SetBrain-only */}
+                                        {tracks.length > DEMO_LIMITS.syncTracksPerPush && (
+                                            <p className="px-4 py-2 text-[11px] text-violet-300/90 bg-violet-500/[0.08] border-b border-white/10">
+                                                Demo syncs the first {DEMO_LIMITS.syncTracksPerPush} tracks. SetBrain pushes the whole crate.
+                                            </p>
+                                        )}
+                                        {DEMO_LIMITS.allowCreatePlaylist ? (
+                                            <div className="p-1 border-b border-white/10">
+                                                {!creating ? (
                                                     <button
-                                                        onClick={createAndSync}
-                                                        disabled={!newName.trim()}
-                                                        className="px-3 py-1.5 rounded-lg bg-[#1DB954]/20 hover:bg-[#1DB954]/30 border border-[#1DB954]/40 text-[#1DB954] text-xs font-bold transition-colors disabled:opacity-40 shrink-0"
+                                                        onClick={() => { setCreating(true); setNewName(crateName); }}
+                                                        className="w-full flex items-center space-x-2 px-3 py-2 text-sm rounded-xl hover:bg-white/10 transition-colors text-left text-[#1DB954] font-bold"
                                                     >
-                                                        Create
+                                                        <Plus size={13} /> <span>New playlist…</span>
                                                     </button>
+                                                ) : (
+                                                    <div className="flex items-center space-x-1.5 p-1">
+                                                        <input
+                                                            autoFocus
+                                                            value={newName}
+                                                            onChange={e => setNewName(e.target.value)}
+                                                            onKeyDown={e => { if (e.key === 'Enter') createAndSync(); }}
+                                                            placeholder="Playlist name"
+                                                            className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-[#1DB954]/50 transition-colors"
+                                                        />
+                                                        <button
+                                                            onClick={createAndSync}
+                                                            disabled={!newName.trim()}
+                                                            className="px-3 py-1.5 rounded-lg bg-[#1DB954]/20 hover:bg-[#1DB954]/30 border border-[#1DB954]/40 text-[#1DB954] text-xs font-bold transition-colors disabled:opacity-40 shrink-0"
+                                                        >
+                                                            Create
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="p-1 border-b border-white/10" title="Available in SetBrain">
+                                                <div className="w-full flex items-center space-x-2 px-3 py-2 text-sm rounded-xl text-left text-gray-500 cursor-default">
+                                                    <Plus size={13} /> <span>New playlist… <span className="text-violet-300/80 font-bold">(SetBrain)</span></span>
                                                 </div>
-                                            )}
-                                        </div>
+                                            </div>
+                                        )}
 
                                         <div className="max-h-64 overflow-y-auto p-1">
                                             {topMatches.map(p => (

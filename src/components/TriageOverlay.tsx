@@ -2,7 +2,9 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, FolderOpen, Loader2, Music2, Pause, Play, Plus, Settings2, SkipForward, Sparkles, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DJDestination, DJDestinationTarget, DJTrack, LoadedLibrary, TriageAssignment, TriageResult } from '../electron';
+import { DEMO_LIMITS } from '../demoLimits';
 import { openSettings } from './SettingsOverlay';
+import { UpgradeHint } from './UpgradeHint';
 
 const WAVE_BARS = 120;
 
@@ -120,7 +122,7 @@ const memberInfo = (t: DJDestinationTarget) =>
 
 export function TriageOverlay({ tracks, libraries, onClose }: Props) {
     const [destinations, setDestinations] = useState<DJDestination[] | null>(null); // null = loading
-    const [mode, setMode] = useState<'triage' | 'setup' | 'summary' | 'applying' | 'done'>('triage');
+    const [mode, setMode] = useState<'triage' | 'setup' | 'summary' | 'applying' | 'done' | 'upgrade'>('triage');
     const [index, setIndex] = useState(0);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [decisions, setDecisions] = useState<Map<string, Set<string>>>(new Map()); // trackId -> destIds
@@ -229,14 +231,24 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
     };
 
     const commitAndAdvance = (dir: 1 | -1 = 1) => {
+        const next = new Map(decisions);
         if (track) {
-            setDecisions(prev => {
-                const next = new Map(prev);
-                if (selected.size > 0) next.set(track.id, new Set(selected));
-                else next.delete(track.id);
-                return next;
-            });
+            if (selected.size > 0) next.set(track.id, new Set(selected));
+            else next.delete(track.id);
         }
+        setDecisions(next);
+
+        // Demo gate: once N tracks have been sorted this session, surface the
+        // upgrade panel instead of advancing. Going back (dir = -1) is always
+        // allowed. LiberAudio is the demo build, so the cap always applies here.
+        const sortedCount = [...next.values()].filter(s => s.size > 0).length;
+        if (dir === 1 && sortedCount >= DEMO_LIMITS.triagePerSession) {
+            audioRef.current?.pause();
+            setPlaying(false);
+            setMode('upgrade');
+            return;
+        }
+
         const ni = index + dir;
         if (ni < 0) return;
         if (ni >= tracks.length) { setMode('summary'); audioRef.current?.pause(); setPlaying(false); }
@@ -476,6 +488,16 @@ export function TriageOverlay({ tracks, libraries, onClose }: Props) {
                 </div>
             )}
 
+            {/* ---------- UPGRADE (demo limit reached) ---------- */}
+            {mode === 'upgrade' && (
+                <UpgradeHint
+                    title={`You've sorted ${DEMO_LIMITS.triagePerSession} tracks`}
+                    body={`This free preview sorts ${DEMO_LIMITS.triagePerSession} tracks per session. SetBrain triages your whole library — no limits, plus set ordering and cue sync. Your picks so far are ready to apply.`}
+                    continueLabel={`Review & apply (${decidedCount})`}
+                    onContinue={() => setMode('summary')}
+                />
+            )}
+
             {/* ---------- DONE ---------- */}
             {mode === 'done' && result && (() => {
                 const lines: { key: string; className: string; node: React.ReactNode }[] = [
@@ -629,17 +651,18 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
     }, []);
 
     const addDraft = (name: string, targets: DJDestinationTarget[]) => {
-        setDrafts(prev => [...prev, {
+        setDrafts(prev => prev.length >= DEMO_LIMITS.maxGroups ? prev : [...prev, {
             id: crypto.randomUUID(),
             name,
             color: PALETTE[prev.length % PALETTE.length],
-            targets,
+            targets: targets.slice(0, DEMO_LIMITS.maxMembersPerGroup),
         }]);
     };
     const renameDraft = (id: string, name: string) =>
         setDrafts(prev => prev.map(d => d.id === id ? { ...d, name } : d));
     const addMember = (id: string, target: DJDestinationTarget) =>
-        setDrafts(prev => prev.map(d => d.id === id ? { ...d, targets: [...d.targets, target] } : d));
+        setDrafts(prev => prev.map(d => d.id === id && d.targets.length < DEMO_LIMITS.maxMembersPerGroup
+            ? { ...d, targets: [...d.targets, target] } : d));
     const removeMember = (id: string, key: string) =>
         setDrafts(prev => prev.map(d => d.id === id ? { ...d, targets: d.targets.filter(t => targetKey(t) !== key) } : d));
 
@@ -746,12 +769,16 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
                                     </span>
                                 );
                             })}
-                            <button
-                                onClick={() => { setPickerFor(p => p === d.id ? null : d.id); setPickerQuery(''); }}
-                                className={`flex items-center space-x-1 text-[11px] rounded-full px-2.5 py-1 border font-bold transition-colors ${pickerFor === d.id ? 'bg-violet-500/20 border-violet-500/40 text-violet-300' : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'}`}
-                            >
-                                <Plus size={11} /> <span>Add playlist</span>
-                            </button>
+                            {d.targets.length < DEMO_LIMITS.maxMembersPerGroup ? (
+                                <button
+                                    onClick={() => { setPickerFor(p => p === d.id ? null : d.id); setPickerQuery(''); }}
+                                    className={`flex items-center space-x-1 text-[11px] rounded-full px-2.5 py-1 border font-bold transition-colors ${pickerFor === d.id ? 'bg-violet-500/20 border-violet-500/40 text-violet-300' : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'}`}
+                                >
+                                    <Plus size={11} /> <span>Add playlist</span>
+                                </button>
+                            ) : (
+                                <span className="text-[10px] text-violet-300/70 py-1">demo max {DEMO_LIMITS.maxMembersPerGroup}</span>
+                            )}
                             {d.targets.length === 0 && (
                                 <span className="text-[11px] text-amber-400/80 py-1">empty group — add at least one playlist</span>
                             )}
@@ -790,23 +817,30 @@ function SetupPanel({ destinations, suggestions, seratoLib, rbLib, itunesLib, on
                 {drafts.length === 0 && <p className="text-gray-500 text-sm text-center py-4">No groups yet — pick a suggestion above or create one below.</p>}
             </div>
 
-            {/* New group: fuzzy-matched members, or same-named playlists if none */}
-            <div className="flex items-center space-x-2 mb-8">
-                <input
-                    value={newName}
-                    onChange={e => setNewName(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && newName.trim()) { addGroupFromName(); } }}
-                    placeholder="New group name (e.g. AmexSet)"
-                    className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 py-2.5 text-sm placeholder:text-gray-600 focus:outline-none focus:border-violet-500/50 transition-colors"
-                />
-                <button
-                    onClick={addGroupFromName}
-                    disabled={!newName.trim()}
-                    className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold disabled:opacity-40 transition-colors"
-                >
-                    Create
-                </button>
-            </div>
+            {/* New group: fuzzy-matched members, or same-named playlists if none.
+                Demo: capped at DEMO_LIMITS.maxGroups groups. */}
+            {drafts.length >= DEMO_LIMITS.maxGroups ? (
+                <p className="text-center text-xs text-violet-300/90 bg-violet-500/10 border border-violet-400/20 rounded-full py-2.5 px-4 mb-8">
+                    Demo limit: {DEMO_LIMITS.maxGroups} group, {DEMO_LIMITS.maxMembersPerGroup} playlists per group. SetBrain has no limits.
+                </p>
+            ) : (
+                <div className="flex items-center space-x-2 mb-8">
+                    <input
+                        value={newName}
+                        onChange={e => setNewName(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && newName.trim()) { addGroupFromName(); } }}
+                        placeholder="New group name (e.g. AmexSet)"
+                        className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 py-2.5 text-sm placeholder:text-gray-600 focus:outline-none focus:border-violet-500/50 transition-colors"
+                    />
+                    <button
+                        onClick={addGroupFromName}
+                        disabled={!newName.trim()}
+                        className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 text-sm font-bold disabled:opacity-40 transition-colors"
+                    >
+                        Create
+                    </button>
+                </div>
+            )}
 
             <button
                 onClick={() => onSave(drafts.filter(d => d.targets.length > 0))}
