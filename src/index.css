@@ -50,3 +50,29 @@ input,
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* --- SETBRAIN PROMO SHIMMER --- */
+/* A violet highlight that sweeps across the SetBrain pill once per minute to
+   draw the eye, then rests. Pure CSS (one long cycle), no JS timer. */
+@keyframes setbrain-shimmer {
+  0% { transform: translateX(-160%); }
+  5% { transform: translateX(160%); }
+  100% { transform: translateX(160%); }
+}
+
+.setbrain-shimmer {
+  background: linear-gradient(
+    100deg,
+    transparent 35%,
+    rgba(167, 139, 250, 0.55) 50%,
+    transparent 65%
+  );
+  transform: translateX(-160%);
+  animation: setbrain-shimmer 60s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setbrain-shimmer {
+    animation: none;
+  }
+}

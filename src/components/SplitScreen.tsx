@@ -12,7 +12,7 @@ const HOME_TOUR: TourStep[] = [
     { target: '[data-tour="panel-spotify"]', title: 'Spotify', text: 'Browse your playlists (log in via Settings for private ones) and download tracks in high quality.' },
     { target: '[data-tour="panel-soundcloud"]', title: 'SoundCloud', text: 'Paste any public SoundCloud playlist or track link and download it.' },
     { target: '[data-tour="panel-youtube"]', title: 'YouTube', text: 'Same for YouTube — playlists or single videos, converted to audio.' },
-    { target: '[data-tour="panel-djlibrary"]', title: 'DJ Library', text: 'Your Serato, rekordbox and Apple Music libraries in one view — hot cues included. Triage new downloads into crates and playlists, Tinder-style.' },
+    { target: '[data-tour="setbrain"]', title: 'SetBrain', text: 'A free preview of SetBrain — see your Serato, rekordbox and Apple Music libraries in one place and triage new tracks into crates and playlists, Tinder-style. The full app lifts the demo limits.' },
     { target: '[data-tour="settings"]', title: 'Settings', text: 'Log into Spotify here, or connect your own Spotify API app for unlimited integrations.' },
     { target: '[data-tour="sync"]', title: 'Library sync', text: 'Point this at your music folder — songs you already own are marked and never downloaded twice.' },
     { target: '[data-tour="help"]', title: 'Help', text: 'Reopens the welcome screen — from there you can take this tour again anytime.' },
@@ -95,6 +95,20 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                 className="absolute top-6 right-6 z-40 flex items-center space-x-4"
                 style={{ WebkitAppRegion: 'no-drag' } as any}
             >
+                {/* SetBrain promo pill — same translucent style as the other
+                    actions, with a violet shimmer that sweeps across roughly
+                    once a minute to draw the eye toward the demo. */}
+                <button
+                    data-tour="setbrain"
+                    onClick={() => onSelectService('djlibrary')}
+                    title="Try SetBrain — organize your DJ library"
+                    className="group relative overflow-hidden px-5 py-3 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-violet-400/30 text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(139,92,246,0.45)] shadow-lg font-bold flex items-center space-x-2"
+                >
+                    <span className="setbrain-shimmer pointer-events-none absolute inset-0" />
+                    <Disc3 size={20} className="stroke-[2.5] text-violet-300 relative z-10" />
+                    <span className="relative z-10 text-sm uppercase tracking-wide">SetBrain</span>
+                </button>
+
                 {/* Release Button (Dynamic) */}
                 {serverConfig?.release && serverConfig.release.text !== 'None' && (
                     <a
@@ -257,19 +271,8 @@ export function SplitScreen({ onSelectService, serverConfig }: Props) {
                 </div>
             </div>
 
-            {/* DJ Library (Far Right) */}
-            <div
-                data-tour="panel-djlibrary"
-                className="flex-1 bg-[#1a1025] hover:bg-[#241536] transition-colors cursor-pointer group flex flex-col items-center justify-center relative overflow-hidden"
-                onClick={() => onSelectService('djlibrary')}
-            >
-                <div className="absolute inset-0 bg-violet-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                <div className="z-10 text-center p-6 flex flex-col items-center">
-                    <Disc3 size={96} className="text-violet-400 mb-6 drop-shadow-[0_0_30px_rgba(167,139,250,0.4)] group-hover:scale-110 group-hover:rotate-180 transition-transform duration-700" />
-                    <h2 className="text-3xl font-bold text-violet-400 tracking-wider uppercase mb-2">DJ Library</h2>
-                    <p className="text-gray-500 text-sm group-hover:text-gray-300 transition-colors">Serato · Rekordbox · Apple Music</p>
-                </div>
-            </div>
+            {/* DJ Library is no longer a home panel — it lives behind the
+                SetBrain promo pill in the top-right (the demo entry point). */}
 
             {/* Guided tour (after the welcome overlay's "Show me around") */}
             {showTour && !showOnboarding && (
