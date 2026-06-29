@@ -39,6 +39,11 @@ export function SpotifyView({ onBack }: Props) {
     const [isLoading, setIsLoading] = useState(false);
     const [isWakingUp, setIsWakingUp] = useState(false);
     const [showErrorOverlay, setShowErrorOverlay] = useState(false);
+    const [errorContent, setErrorContent] = useState({
+        title: 'Whoops! We hit a wall.',
+        body: "It looks like this playlist is playing hard to get (Private) or doesn't exist. We aren't hackers, we can only see what's public!",
+        hint: "Please check the link and make sure it's Public.",
+    });
 
     const [playlistUrl, setPlaylistUrl] = useState('');
     const [songs, setSongs] = useState<Song[]>([]);
@@ -52,6 +57,26 @@ export function SpotifyView({ onBack }: Props) {
     const [showMyPlaylists, setShowMyPlaylists] = useState(false);
     const [myPlaylists, setMyPlaylists] = useState<MyPlaylist[] | null>(null); // null = not loaded
     const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+
+    // Error-overlay copy for the cases we can tell apart. Spotify-owned
+    // editorial/algorithmic playlists (IDs starting 37i9dQZF1D) have been
+    // unreadable via the Web API since Spotify's 2024-11-27 policy change —
+    // they 404 even though they're public, so we say so honestly.
+    const DEFAULT_ERROR = {
+        title: 'Whoops! We hit a wall.',
+        body: "It looks like this playlist is playing hard to get (Private) or doesn't exist. We aren't hackers, we can only see what's public!",
+        hint: "Please check the link and make sure it's Public.",
+    };
+    const EDITORIAL_ERROR = {
+        title: 'Spotify blocks this playlist',
+        body: "This is one of Spotify's own editorial/algorithmic playlists (Discover Weekly, Daily Mix, Radio, “This Is…”, etc.). Since November 2024 Spotify no longer lets apps read these — even though they look public.",
+        hint: 'Pick a user-created playlist instead and it will work.',
+    };
+    const AUTH_ERROR = {
+        title: 'Spotify said no',
+        body: 'Spotify rejected the request — usually an expired login or a rate limit. Log in again via Settings, or set up your own Spotify API key for unlimited access.',
+        hint: 'Open Settings → Spotify.',
+    };
 
     useEffect(() => {
         window.electronAPI.spotifyGetToken?.().then(t => setHasUserSession(!!t)).catch(() => { });
@@ -159,6 +184,16 @@ export function SpotifyView({ onBack }: Props) {
             return;
         }
 
+        // Spotify-owned editorial/algorithmic playlists can't be read via the
+        // API anymore (2024-11-27 policy change) — fail honestly, up front.
+        if (isPlaylist && id.startsWith('37i9dQZF1D')) {
+            setStatusMsg('Spotify editorial/algorithmic playlist — not accessible via the API');
+            setErrorContent(EDITORIAL_ERROR);
+            setShowErrorOverlay(true);
+            setIsLoading(false);
+            return;
+        }
+
         const toSong = (track: any, extraArtist?: string): Song => {
             const artist = track.artists?.map((a: any) => a.name).join(', ') || extraArtist || 'Unknown Artist';
             // Already downloaded before, or already present in the synced library folder
@@ -208,7 +243,18 @@ export function SpotifyView({ onBack }: Props) {
             setSongs(allSongs);
             setStatusMsg(`Found ${allSongs.length} item(s).`);
         } catch (e) {
-            setStatusMsg('Error fetching data');
+            const status = (e as any)?.response?.status;
+            if (status === 404 && isPlaylist) {
+                // Editorial/algorithmic playlists 404 since the Nov 2024 change
+                setStatusMsg('Spotify no longer allows access to this playlist');
+                setErrorContent(EDITORIAL_ERROR);
+            } else if (status === 401 || status === 403) {
+                setStatusMsg('Spotify authorization failed');
+                setErrorContent(AUTH_ERROR);
+            } else {
+                setStatusMsg('Error fetching data');
+                setErrorContent(DEFAULT_ERROR);
+            }
             console.error(e);
             setShowErrorOverlay(true);
         } finally {
@@ -347,13 +393,12 @@ export function SpotifyView({ onBack }: Props) {
             {showErrorOverlay && (
                 <div className="absolute inset-0 z-50 backdrop-blur-md flex items-center justify-center p-8">
                     <div className="bg-black/80 border border-red-500/50 rounded-2xl p-8 max-w-lg w-full shadow-2xl relative text-center backdrop-blur-xl">
-                        <h2 className="text-3xl font-black text-red-500 mb-4 uppercase tracking-wide">Whoops! We hit a wall.</h2>
+                        <h2 className="text-3xl font-black text-red-500 mb-4 uppercase tracking-wide">{errorContent.title}</h2>
                         <p className="text-gray-300 mb-6 text-lg leading-relaxed">
-                            It looks like this playlist is playing hard to get (Private) or doesn't exist.
-                            We aren't hackers, we can only see what's public!
+                            {errorContent.body}
                         </p>
                         <p className="text-sm text-gray-500 mb-8 font-mono">
-                            Please check the link and make sure it's Public.
+                            {errorContent.hint}
                         </p>
 
                         <button onClick={() => setShowErrorOverlay(false)} className="bg-red-500 text-black hover:bg-red-400 font-black py-3 px-8 rounded-full transition-colors w-full shadow-lg">
