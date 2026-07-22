@@ -1,15 +1,19 @@
-# LiberAudio v1.2.2 — Maintenance Update
+# LiberAudio v1.2.3 — Reliability Update
 
-A small maintenance release. No action needed — the app auto-updates, or just download and replace your existing copy.
+Fixes SoundCloud downloading plus a batch of stability improvements. The app auto-updates, or just download and replace your existing copy.
 
 ## 🔧 What's Changed
-- **Spotify editorial playlists:** when you paste one of Spotify's own curated playlists (Discover Weekly, Daily Mix, Radio, "This Is…", links starting `37i9dQZF1D`), the app now explains the easy workaround — copy the tracks into your own playlist in Spotify, then paste that link. Spotify locked these lists out of its public API in Nov 2024, so this is the reliable way to grab them.
-- Internal stability and reliability improvements.
+- **SoundCloud downloads work again.** Every SoundCloud track was failing because the app fetched a temporary stream link instead of the track page — fixed.
+- **No more freezing after a failed download.** A single failed track used to lock up the download button until you restarted the app; downloads now keep going and recover cleanly.
+- **Fewer stalls and hangs.** Scans and downloads that get stuck (dead links, network drops) now time out instead of spinning forever.
+- **Spotify:** private or mistyped playlist links now show the correct "private or doesn't exist" message instead of the editorial-playlist tip.
+- **Faster startup:** stops needlessly re-downloading the search engine on launch.
+- Various smaller correctness and matching fixes.
 
 ---
 **First time opening the app?** macOS will warn about an unidentified developer — see the quick fix on our [download page](https://wirthzig.github.io/liber-audio/#gatekeeper).
 
 ---
 **Download below** — pick the file matching your Mac:
-- **Apple Silicon** (M1/M2/M3/M4): `LiberAudio-v1.2.2-macOS-arm64.dmg`
-- **Intel**: `LiberAudio-v1.2.2-macOS-x64.dmg`
+- **Apple Silicon** (M1/M2/M3/M4): `LiberAudio-v1.2.3-macOS-arm64.dmg`
+- **Intel**: `LiberAudio-v1.2.3-macOS-x64.dmg`

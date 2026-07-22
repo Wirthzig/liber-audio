@@ -13,12 +13,21 @@ const INDEX_KEY = 'library_index';
 
 export class LibraryManager {
     private static cachedIndex: Set<string> | null = null;
+    // DJ-library tracks (Serato/rekordbox/iTunes) are kept in a SEPARATE
+    // in-memory set and never written to localStorage — they're rebuilt each
+    // launch and would otherwise go stale on disk. (Previously they leaked into
+    // cachedIndex and got persisted by sync(), so removed/renamed DJ tracks kept
+    // marking songs as "already owned" until the next refresh.)
+    private static djIndex: Set<string> = new Set();
     private static refreshed = false;
 
     static getFolders(): string[] {
         try {
             const raw = localStorage.getItem(FOLDERS_KEY);
-            if (raw) return JSON.parse(raw);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) return parsed;
+            }
         } catch (e) {
             console.error('Failed to parse library folders', e);
         }
@@ -32,7 +41,8 @@ export class LibraryManager {
         try {
             const raw = localStorage.getItem(INDEX_KEY);
             if (raw) {
-                this.cachedIndex = new Set(JSON.parse(raw));
+                const parsed = JSON.parse(raw);
+                this.cachedIndex = new Set(Array.isArray(parsed) ? parsed : []);
                 return this.cachedIndex;
             }
         } catch (e) {
@@ -93,18 +103,19 @@ export class LibraryManager {
         try {
             const res = await window.electronAPI.djOwnedTracks();
             if (!res.success || !res.tracks) return;
-            const index = this.getIndex();
+            const dj = new Set<string>();
             for (const t of res.tracks) {
                 const n = normalizeForMatch(`${t.artist} - ${t.title}`);
-                if (n) index.add(n);
+                if (n) dj.add(n);
             }
-            this.cachedIndex = index;
+            this.djIndex = dj; // memory only — never persisted
         } catch { /* DJ libraries unavailable — the folder index still applies */ }
     }
 
-    /** Does the library contain this song? */
+    /** Does the library contain this song? (folder index OR DJ libraries) */
     static has(artist: string, title: string): boolean {
-        return this.getIndex().has(normalizeForMatch(`${artist} - ${title}`));
+        const n = normalizeForMatch(`${artist} - ${title}`);
+        return this.getIndex().has(n) || this.djIndex.has(n);
     }
 
     static clear() {
@@ -112,5 +123,6 @@ export class LibraryManager {
         localStorage.removeItem(LEGACY_FOLDER_KEY);
         localStorage.removeItem(INDEX_KEY);
         this.cachedIndex = null;
+        this.djIndex = new Set();
     }
 }

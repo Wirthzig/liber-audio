@@ -133,14 +133,13 @@ macOS **Gatekeeper** quarantines binaries downloaded from the internet.
     ```
 *   This allows us to download `yt-dlp` dynamically without the user needing to go to System Settings -> Security.
 
-### 5. Deployment & CI/CD
+### 5. Deployment
 
-We use **GitHub Actions** for a fully automated release pipeline (`release.yml`).
-1.  **Push Tag**: `git push origin v1.0.0`
-2.  **Build**: Compiles React (Vite) and Main (TypeScript).
-3.  **Package**: `electron-builder` signs the `.dmg`.
-4.  **Checksum**: A script generates a SHA-256 hash for integrity verification.
-5.  **Release**: Uploads assets to GitHub Releases.
+Releases are built and published **manually** (there is no build CI):
+1.  **Build**: `npm run build` compiles React (Vite) + Main (TypeScript) and runs `electron-builder`, producing `.dmg`, `.zip` and `latest-mac.yml` in `dist_app/` (unsigned/ad-hoc — see the Gatekeeper note below).
+2.  **Release**: Create a GitHub Release tagged `vX.Y.Z` and upload **all** of the `.dmg`, `.zip`, `.blockmap` and `latest-mac.yml` assets. `latest-mac.yml` + the `.zip` drive in-app auto-update; the `.dmg` is the website download.
+
+> A `release-drafter.yml` GitHub Action drafts the release **notes** only — it does not build, sign, or upload anything.
 
 ---
 
@@ -150,8 +149,8 @@ Prerequisites: **Node.js v20+**, **npm v10+**, **macOS**.
 
 ```bash
 # 1. Clone
-git clone https://github.com/Wirthzig/universal-music-downloader.git
-cd universal-music-downloader
+git clone https://github.com/Wirthzig/liber-audio.git
+cd liber-audio
 
 # 2. Install
 npm install

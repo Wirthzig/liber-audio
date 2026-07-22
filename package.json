@@ -6,7 +6,7 @@
   "main": "dist-electron/main.cjs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Wirthzig/LiberAudio"
+    "url": "https://github.com/Wirthzig/liber-audio"
   },
   "author": "Alexander Wirths",
   "description": "Download Music from Spotify, SoundCloud, and YouTube",

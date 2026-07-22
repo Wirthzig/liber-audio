@@ -40,6 +40,7 @@ let isYtMusicReady = false;
 let ytmusicFailStreak = 0; // consecutive hard (non-429) failures
 let ytmusicDisabled = false; // skip Tier 1 for the session once it's clearly broken
 let lastSearchTime = 0;
+let throttleChain: Promise<void> = Promise.resolve(); // serializes the search rate-limit gate
 
 // --- SELF-UPDATING SEARCH MODULE ---
 // The YTMusic search library is bundled into one self-contained file that
@@ -49,7 +50,7 @@ let lastSearchTime = 0;
 const SEARCH_MODULE_DIR = path.join(APP_SUPPORT, 'search-module');
 const SEARCH_MODULE_PATH = path.join(SEARCH_MODULE_DIR, 'ytmusic-bundle.cjs');
 const SEARCH_MODULE_VERSION_PATH = path.join(SEARCH_MODULE_DIR, 'version.json');
-const SEARCH_MODULE_BASE = 'https://raw.githubusercontent.com/Wirthzig/LiberAudio/main/search-module';
+const SEARCH_MODULE_BASE = 'https://raw.githubusercontent.com/Wirthzig/liber-audio/main/search-module';
 
 let searchModuleChecked = false;
 
@@ -131,8 +132,17 @@ const saveSearchCache = () => {
         fs.writeFileSync(SEARCH_CACHE_PATH, JSON.stringify(Object.fromEntries(searchCache)));
     } catch (e) { console.warn('[Main] Failed to save search cache:', e); }
 };
+const SEARCH_CACHE_MAX = 5000;
 const cacheSearchResult = (key: string, url: string) => {
     searchCache.set(key, url);
+    // Bound memory + disk: Map keeps insertion order, so evict oldest entries
+    // once we cross the cap. Prevents the cache growing without limit across a
+    // long session of large playlists.
+    while (searchCache.size > SEARCH_CACHE_MAX) {
+        const oldest = searchCache.keys().next().value;
+        if (oldest === undefined) break;
+        searchCache.delete(oldest);
+    }
     // Debounce: a playlist fires many lookups; rewriting the whole cache file
     // on every result was synchronous main-thread I/O that grew with the
     // session. Flush at most once every few seconds instead.
@@ -166,24 +176,39 @@ const downloadFile = (url: string, dest: string) => {
                 resolve();
             });
         };
-        https.get(url, handleResponse).on('error', (err) => {
+        const req = https.get(url, handleResponse).on('error', (err) => {
             fs.unlink(dest, () => { });
             reject(err);
+        });
+        // Abort a stalled connection (no data for 60s) so startup can't wedge
+        // forever waiting on a dead CDN.
+        req.setTimeout(60_000, () => {
+            req.destroy(new Error('download timed out after 60s'));
         });
     });
 };
 
 const getYtDlpLatestVersion = (): Promise<string> => {
     return new Promise((resolve, reject) => {
-        https.get('https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest', {
+        const req = https.get('https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest', {
             headers: { 'User-Agent': 'LiberAudio' }
         }, (res) => {
             let data = '';
             res.on('data', d => data += d);
             res.on('end', () => {
-                try { resolve(JSON.parse(data).tag_name); } catch (e) { reject(e); }
+                try {
+                    const tag = JSON.parse(data).tag_name;
+                    // When the unauthenticated API is rate-limited (60/hr) the body
+                    // is a valid JSON *error* object with no tag_name. Treat a
+                    // missing/non-string tag as a failure so the caller keeps the
+                    // existing binary instead of deleting + re-downloading ~30 MB
+                    // on every launch until the limit clears.
+                    if (typeof tag === 'string' && tag) resolve(tag);
+                    else reject(new Error('no tag_name in GitHub response (rate-limited?)'));
+                } catch (e) { reject(e); }
             });
         }).on('error', reject);
+        req.setTimeout(10_000, () => req.destroy(new Error('version check timed out')));
     });
 };
 
@@ -253,6 +278,7 @@ const setupFFmpeg = async () => {
 };
 
 let initPromise: Promise<void> | null = null;
+let depError: any = null;
 
 function createWindow() {
     console.log('[Main] Creating Window...');
@@ -540,9 +566,18 @@ app.whenReady().then(async () => {
     console.log(`[Main] App Ready. Node: ${process.version}, Arch: ${process.arch}, Platform: ${process.platform}`);
 
     // liberaudio://<encoded absolute path> → streams the local audio file
+    const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.aac', '.wav', '.aiff', '.aif', '.flac', '.ogg', '.opus', '.wma', '.alac']);
     protocol.registerFileProtocol('liberaudio', (request, callback) => {
         try {
-            callback({ path: decodeURI(request.url.replace('liberaudio://', '')) });
+            // decodeURIComponent (not decodeURI) so paths with #, ?, % etc. resolve
+            // correctly; only serve real, existing audio files — this scheme is an
+            // arbitrary local-file read primitive otherwise.
+            const filePath = decodeURIComponent(request.url.replace('liberaudio://', ''));
+            if (!path.isAbsolute(filePath) || !AUDIO_EXTS.has(path.extname(filePath).toLowerCase()) || !fs.existsSync(filePath)) {
+                callback({ error: -6 /* FILE_NOT_FOUND */ });
+                return;
+            }
+            callback({ path: filePath });
         } catch (e) {
             console.error('[Main] liberaudio protocol error:', e);
             callback({ error: -6 /* FILE_NOT_FOUND */ });
@@ -577,13 +612,18 @@ app.whenReady().then(async () => {
     console.log('[Main] Checking for updates...');
     autoUpdater.checkForUpdatesAndNotify();
 
-    // Parallel init
+    // Parallel init. Remember a failure instead of swallowing it: otherwise
+    // init-dependencies reports success, then every spawn fails with ENOENT and
+    // the user sees the misleading "Downloader is not installed yet" forever.
     initPromise = Promise.all([setupYtDlp(), setupFFmpeg()])
-        .then(() => console.log('[Main] All dependencies ready.'))
-        .catch(err => console.error('[Main] Dep Failure:', err));
+        .then(() => { depError = null; console.log('[Main] All dependencies ready.'); })
+        .catch(err => { depError = err; console.error('[Main] Dep Failure:', err); });
 
     ipcMain.handle('init-dependencies', async () => {
         if (initPromise) await initPromise;
+        if (depError) {
+            return { success: false, error: `Setup failed: ${depError?.message || depError}. Check your internet connection and reopen the app.` };
+        }
         return { success: true };
     });
 
@@ -841,9 +881,15 @@ app.whenReady().then(async () => {
             }
         }
 
-        // Apple Music: official AppleScript API
+        // Apple Music: official AppleScript API. Guard per-playlist like every
+        // other platform below — one failing AppleScript call must not reject the
+        // whole handler and discard the Serato/rekordbox/Spotify results.
         for (const [playlist, paths] of musicPlaylists) {
-            result.music.push(await addToMusicPlaylist(playlist, paths));
+            try {
+                result.music.push(await addToMusicPlaylist(playlist, paths));
+            } catch (e: any) {
+                result.errors.push(`Apple Music · ${playlist}: ${e.message}`);
+            }
         }
 
         // rekordbox: ONE persistent xml (~/Music/LiberAudio) accumulating all
@@ -933,6 +979,9 @@ app.whenReady().then(async () => {
     // --- GENERIC METADATA SCANNER (SC/YT) ---
     ipcMain.handle('fetch-metadata', async (_, url) => {
         if (initPromise) await initPromise;
+        if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+            return { success: false, error: 'Please paste a valid http(s) link.' };
+        }
         console.log(`[Main] Fetching metadata for: ${url}`);
 
         return new Promise((resolve) => {
@@ -944,9 +993,17 @@ app.whenReady().then(async () => {
             args.push(url);
 
             const child = spawn(YT_DLP_PATH, args);
+            let settled = false;
+            const done = (r: any) => { if (settled) return; settled = true; clearTimeout(timer); try { child.kill(); } catch { /* already gone */ } resolve(r); };
+            // A stalled scan (dead SC host, consent wall, huge playlist) would
+            // otherwise hang the renderer spinner forever and orphan the process.
+            const timer = setTimeout(() => {
+                console.error('[Main] Metadata fetch timed out');
+                done({ success: false, error: 'Timed out reading that link — try again, or check it plays in a browser.' });
+            }, 90_000);
             child.on('error', (err) => {
                 console.error('[Main] Failed to spawn yt-dlp:', err);
-                resolve({ success: false, error: 'Downloader is not installed yet. Please wait a moment and try again.' });
+                done({ success: false, error: 'Downloader is not installed yet. Please wait a moment and try again.' });
             });
 
             let stdout = '';
@@ -958,7 +1015,7 @@ app.whenReady().then(async () => {
             child.on('close', (code) => {
                 if (code !== 0) {
                     console.error(`[Main] Metadata fetch failed: ${stderr}`);
-                    resolve({ success: false, error: 'Failed to fetch metadata' });
+                    done({ success: false, error: 'Failed to fetch metadata' });
                     return;
                 }
 
@@ -1013,11 +1070,11 @@ app.whenReady().then(async () => {
                     }).filter((t: any) => t !== null);
 
                     console.log(`[Main] Found ${tracks.length} items.`);
-                    resolve({ success: true, tracks });
+                    done({ success: true, tracks });
 
                 } catch (e) {
                     console.error('[Main] JSON Parse error during metadata fetch', e);
-                    resolve({ success: false, error: 'Invalid response from downloader' });
+                    done({ success: false, error: 'Invalid response from downloader' });
                 }
             });
         });
@@ -1051,17 +1108,23 @@ app.whenReady().then(async () => {
                 `${prefix}:${query}`
             ];
             const child = spawn(YT_DLP_PATH, args);
+            let settled = false;
+            const finish = (v: any[]) => { if (settled) return; settled = true; clearTimeout(timer); try { child.kill(); } catch { /* gone */ } resolve(v); };
+            const timer = setTimeout(() => {
+                console.error('[Main] yt-dlp search timed out');
+                finish([]);
+            }, 45_000);
             child.on('error', (err) => {
                 console.error('[Main] Failed to spawn yt-dlp for search:', err);
-                resolve([]);
+                finish([]);
             });
             let stdout = '';
             child.stdout.on('data', d => stdout += d.toString());
             child.on('close', () => {
                 try {
                     const data = JSON.parse(stdout);
-                    resolve(data.entries || []);
-                } catch (e) { resolve([]); }
+                    finish(data.entries || []);
+                } catch (e) { finish([]); }
             });
         });
     };
@@ -1177,12 +1240,17 @@ app.whenReady().then(async () => {
 
         console.log(`[Main] Searching: "${query}"`);
 
-        const now = Date.now();
-        const timeSinceLast = now - lastSearchTime;
-        if (timeSinceLast < 1100) {
-            await sleep(1100 - timeSinceLast);
-        }
-        lastSearchTime = Date.now();
+        // Serialize the throttle: a playlist fires many concurrent search-youtube
+        // calls. Reading a shared lastSearchTime and sleeping independently let
+        // them all wake at once and burst — the exact 429 the throttle exists to
+        // prevent. Chain each caller's gate onto the previous one so they space
+        // out ~1.1s apart for real.
+        throttleChain = throttleChain.then(async () => {
+            const timeSinceLast = Date.now() - lastSearchTime;
+            if (timeSinceLast < 1100) await sleep(1100 - timeSinceLast);
+            lastSearchTime = Date.now();
+        });
+        await throttleChain;
 
         // --- TIER 1: YouTube Music (in-process API) ---
         if (isYtMusicReady && ytmusic && !ytmusicDisabled) {
@@ -1275,11 +1343,20 @@ app.whenReady().then(async () => {
     ipcMain.handle('download-song', async (_event, { url, folder, artist, title }) => {
         // Ensure dependencies are ready before starting download
         if (initPromise) await initPromise;
+        if (typeof url !== 'string' || !url || typeof folder !== 'string' || !folder) {
+            return { success: false, error: 'Missing download URL or folder.' };
+        }
 
         return new Promise((resolve) => {
             const safeTitle = sanitizeFilename(title);
             const safeArtist = sanitizeFilename(artist);
-            const outputTemplate = path.join(folder, `${safeArtist} - ${safeTitle}.%(ext)s`);
+            // A bare `%` in a title (e.g. "100% Pure Love") is a yt-dlp output-template
+            // field marker and corrupts the filename / errors the download. Escape it
+            // as `%%` for the -o template ONLY — the metadata args below must keep the
+            // real single `%`.
+            const tmplTitle = safeTitle.replace(/%/g, '%%');
+            const tmplArtist = safeArtist.replace(/%/g, '%%');
+            const outputTemplate = path.join(folder, `${tmplArtist} - ${tmplTitle}.%(ext)s`);
 
             const args = [
                 '--ffmpeg-location', FFMPEG_PATH, // <--- CRITICAL: Use the bundled binary
@@ -1298,9 +1375,17 @@ app.whenReady().then(async () => {
             ];
 
             const child = spawn(YT_DLP_PATH, args);
+            let settled = false;
+            const done = (r: any) => { if (settled) return; settled = true; clearTimeout(timer); try { child.kill(); } catch { /* already gone */ } resolve(r); };
+            // Kill a wedged download (dead HLS host, network stall) so one stuck
+            // track can't pin a worker slot forever and hang the whole batch.
+            const timer = setTimeout(() => {
+                console.error('[Main] Download timed out');
+                done({ success: false, error: 'Download timed out.' });
+            }, 5 * 60 * 1000);
             child.on('error', (err) => {
                 console.error('[Main] Failed to spawn yt-dlp for download:', err);
-                resolve({ success: false, error: 'Downloader is not installed yet. Please wait a moment and try again.' });
+                done({ success: false, error: 'Downloader is not installed yet. Please wait a moment and try again.' });
             });
             child.stdout.on('data', (d) => process.stdout.write(d));
             let stderrOutput = '';
@@ -1309,9 +1394,9 @@ app.whenReady().then(async () => {
             child.on('close', (code) => {
                 if (code === 0) {
                     recordDownload(); // anonymous counter only — no titles
-                    resolve({ success: true });
+                    done({ success: true });
                 }
-                else resolve({ success: false, error: stderrOutput || `Exit code ${code}` });
+                else done({ success: false, error: stderrOutput || `Exit code ${code}` });
             });
         });
     });

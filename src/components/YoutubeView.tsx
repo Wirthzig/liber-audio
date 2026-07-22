@@ -106,32 +106,43 @@ export function YoutubeView({ onBack }: Props) {
                 const i = queue[qIdx];
 
                 setStatus(i, 'downloading');
-                const res = await window.electronAPI.downloadSong({
-                    url: newSongs[i].url,
-                    folder: targetFolder,
-                    artist: newSongs[i].artist,
-                    title: newSongs[i].title
-                });
-
-                if (res.success) {
-                    setStatus(i, 'downloaded');
-                    HistoryManager.add({
-                        id: newSongs[i].id,
-                        source: 'youtube',
-                        title: newSongs[i].title,
+                try {
+                    const res = await window.electronAPI.downloadSong({
+                        url: newSongs[i].url,
+                        folder: targetFolder,
                         artist: newSongs[i].artist,
-                        timestamp: Date.now()
+                        title: newSongs[i].title
                     });
-                } else {
+
+                    if (res.success) {
+                        setStatus(i, 'downloaded');
+                        HistoryManager.add({
+                            id: newSongs[i].id,
+                            source: 'youtube',
+                            title: newSongs[i].title,
+                            artist: newSongs[i].artist,
+                            timestamp: Date.now()
+                        });
+                    } else {
+                        setStatus(i, 'error');
+                    }
+                } catch (e) {
+                    // A rejected IPC call must not kill the pool or freeze the UI.
+                    console.error('Download failed for track', i, e);
                     setStatus(i, 'error');
                 }
             }
         };
 
-        await Promise.all(Array.from({ length: DOWNLOAD_CONCURRENCY }, () => worker()));
-
-        setIsProcessing(false);
-        setStatusMsg(abortRef.current ? 'Stopped' : 'All Done');
+        try {
+            await Promise.all(Array.from({ length: DOWNLOAD_CONCURRENCY }, () => worker()));
+            setStatusMsg(abortRef.current ? 'Stopped' : 'All Done');
+        } catch (e) {
+            console.error('Download batch error', e);
+            setStatusMsg('Some downloads failed — try again');
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     const toggleSelect = (idx: number) => {

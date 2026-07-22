@@ -11,7 +11,9 @@ import { openSettings } from './SettingsOverlay';
 // the triage flow (search-match per track, dedup against the playlist,
 // POST-append; never deletes). First slice of the future sync engine.
 
-const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+// Strip accents (NFD) before removing non-alphanumerics so "Café" matches
+// "Cafe" — consistent with normalizeForMatch used by the library index.
+const normName = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 
 interface SpotifyPlaylist { id: string; name: string; trackCount: number }
 
@@ -251,7 +253,7 @@ export function SyncToSpotify({ tracks, crateName }: { tracks: DJTrack[]; crateN
                         {phase === 'syncing' && (
                             <div className="flex flex-col items-center py-8 text-gray-400 text-xs space-y-3">
                                 <Loader2 size={22} className="animate-spin text-[#1DB954]" />
-                                <p>Matching {tracks.length} tracks on Spotify…</p>
+                                <p>Matching {Math.min(tracks.filter(t => t.title).length, DEMO_LIMITS.syncTracksPerPush)} tracks on Spotify…</p>
                             </div>
                         )}
 

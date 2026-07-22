@@ -244,10 +244,13 @@ export function SpotifyView({ onBack }: Props) {
             setStatusMsg(`Found ${allSongs.length} item(s).`);
         } catch (e) {
             const status = (e as any)?.response?.status;
-            if (status === 404 && isPlaylist) {
-                // Editorial/algorithmic playlists 404 since the Nov 2024 change
-                setStatusMsg('Spotify no longer allows access to this playlist');
-                setErrorContent(EDITORIAL_ERROR);
+            if (status === 404) {
+                // Known editorial/algorithmic playlists (37i9dQZF1D…) are caught
+                // up front, so a 404 here means a genuinely private, deleted or
+                // mistyped link — NOT an editorial playlist. Showing the "copy the
+                // tracks into your own playlist" advice would be wrong and confusing.
+                setStatusMsg('Playlist is private or does not exist');
+                setErrorContent(DEFAULT_ERROR);
             } else if (status === 401 || status === 403) {
                 setStatusMsg('Spotify authorization failed');
                 setErrorContent(AUTH_ERROR);
@@ -304,11 +307,19 @@ export function SpotifyView({ onBack }: Props) {
                     continue;
                 }
                 setStatus(i, 'searching');
-                const url = await window.electronAPI.searchYoutube({
-                    artist: newSongs[i].artist,
-                    title: newSongs[i].title,
-                    duration: newSongs[i].durationMs ? Math.round(newSongs[i].durationMs! / 1000) : undefined
-                });
+                let url: string | null = null;
+                try {
+                    url = await window.electronAPI.searchYoutube({
+                        artist: newSongs[i].artist,
+                        title: newSongs[i].title,
+                        duration: newSongs[i].durationMs ? Math.round(newSongs[i].durationMs! / 1000) : undefined
+                    });
+                } catch (e) {
+                    // A rejected search must still resolve this slot to null,
+                    // otherwise the waiting worker loops forever and the batch
+                    // never finishes (frozen UI).
+                    console.error('Search failed for track', i, e);
+                }
                 resolved[i] = url;
                 if (url) {
                     newSongs[i] = { ...newSongs[i], youtubeUrl: url };
@@ -335,32 +346,43 @@ export function SpotifyView({ onBack }: Props) {
                 if (!url) continue; // search came up empty
 
                 setStatus(i, 'downloading');
-                const res = await window.electronAPI.downloadSong({
-                    url,
-                    folder: targetFolder,
-                    artist: newSongs[i].artist,
-                    title: newSongs[i].title
-                });
-
-                if (res.success) {
-                    setStatus(i, 'downloaded');
-                    HistoryManager.add({
-                        id: newSongs[i].id,
-                        source: 'spotify',
-                        title: newSongs[i].title,
+                try {
+                    const res = await window.electronAPI.downloadSong({
+                        url,
+                        folder: targetFolder,
                         artist: newSongs[i].artist,
-                        timestamp: Date.now()
+                        title: newSongs[i].title
                     });
-                } else {
+
+                    if (res.success) {
+                        setStatus(i, 'downloaded');
+                        HistoryManager.add({
+                            id: newSongs[i].id,
+                            source: 'spotify',
+                            title: newSongs[i].title,
+                            artist: newSongs[i].artist,
+                            timestamp: Date.now()
+                        });
+                    } else {
+                        setStatus(i, 'error');
+                    }
+                } catch (e) {
+                    // A rejected IPC call must not kill the pool or freeze the UI.
+                    console.error('Download failed for track', i, e);
                     setStatus(i, 'error');
                 }
             }
         };
 
-        await Promise.all([searcher, ...Array.from({ length: DOWNLOAD_CONCURRENCY }, () => worker())]);
-
-        setIsProcessing(false);
-        setStatusMsg(abortRef.current ? 'Stopped' : 'All Done');
+        try {
+            await Promise.all([searcher, ...Array.from({ length: DOWNLOAD_CONCURRENCY }, () => worker())]);
+            setStatusMsg(abortRef.current ? 'Stopped' : 'All Done');
+        } catch (e) {
+            console.error('Download batch error', e);
+            setStatusMsg('Some downloads failed — try again');
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     const stopProcess = () => {

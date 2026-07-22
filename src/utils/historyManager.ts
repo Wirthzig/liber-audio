@@ -30,7 +30,12 @@ export class HistoryManager {
         let history: HistoryItem[] = [];
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw) history = JSON.parse(raw);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                // Guard the shape: a legacy/tampered non-array value would make the
+                // history.map() below throw out of has()/add() and break scans.
+                if (Array.isArray(parsed)) history = parsed;
+            }
         } catch (e) {
             console.error('Failed to parse history', e);
         }

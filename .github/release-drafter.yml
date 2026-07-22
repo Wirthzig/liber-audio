@@ -30,10 +30,10 @@ version-resolver:
 template: |
   <img width="1364" height="685" alt="release-banner" src="https://github.com/user-attachments/assets/a991fcf3-fbe5-4d1d-a84b-4b0710d9c2c7" />
 
-  # Universal Music Downloader v$RESOLVED_VERSION 🎵
+  # LiberAudio v$RESOLVED_VERSION 🎵
 
-  [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?style=for-the-badge&logo=apple)](https://github.com/Wirthzig/universal-music-downloader/releases)
-  [![Build Verified](https://img.shields.io/badge/build-verified-success?style=for-the-badge&logo=githubactions)](https://github.com/Wirthzig/universal-music-downloader/actions)
+  [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?style=for-the-badge&logo=apple)](https://github.com/Wirthzig/liber-audio/releases)
+  [![Build Verified](https://img.shields.io/badge/build-verified-success?style=for-the-badge&logo=githubactions)](https://github.com/Wirthzig/liber-audio/actions)
   [![Vibe Check](https://img.shields.io/badge/vibe-impeccable-ff00d4?style=for-the-badge)]()
 
   > **The ultimate tool to yeet your favorite playlists onto your hard drive.**  
@@ -77,9 +77,10 @@ template: |
   ---
 
   ## 📥 Download
-  | Platform | Arch | File | SHA-256 (Trust Factor) |
-  | :--- | :--- | :--- | :--- |
-  | **macOS** | Apple Silicon | [**Download .dmg**](https://github.com/Wirthzig/universal-music-downloader/releases/latest/download/Universal-Music-Downloader-v$RESOLVED_VERSION-macOS-Silicon.dmg) | `SHA256_HASH_GOES_HERE` |
+  | Platform | Arch | File |
+  | :--- | :--- | :--- |
+  | **macOS** | Apple Silicon (M-series) | [**Download .dmg**](https://github.com/Wirthzig/liber-audio/releases/latest/download/LiberAudio-v$RESOLVED_VERSION-macOS-arm64.dmg) |
+  | **macOS** | Intel | [**Download .dmg**](https://github.com/Wirthzig/liber-audio/releases/latest/download/LiberAudio-v$RESOLVED_VERSION-macOS-x64.dmg) |
 
   ---
 
@@ -95,7 +96,7 @@ template: |
 
   **Alternative Power User Fix (Terminal):**
   ```bash
-  sudo xattr -cr /Applications/"Universal Music Downloader.app"
+  sudo xattr -cr /Applications/LiberAudio.app
   ```
 
   ## ⚠️ Legal Disclaimer

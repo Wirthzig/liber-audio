@@ -102,7 +102,9 @@ interface Props {
 
 const PALETTE = ['#A78BFA', '#34D399', '#38BDF8', '#F472B6', '#FBBF24', '#FB7185', '#4ADE80', '#22D3EE', '#E879F9'];
 
-const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+// NFD-strip accents before dropping non-alphanumerics so "Café" matches "Cafe"
+// — consistent with normalizeForMatch and SyncToSpotify's matching.
+const normName = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 
 // Crate file base ('%%'-joined hierarchy) — what the Serato writer expects
 const crateFileBase = (crate: { name: string; path: string[] }) => [...crate.path, crate.name].join('%%');

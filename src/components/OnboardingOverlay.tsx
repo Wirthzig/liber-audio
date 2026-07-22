@@ -39,7 +39,7 @@ export function OnboardingOverlay({ onDismiss }: Props) {
                 <div className="relative z-10 flex flex-col items-center">
                     <img src={MainLogo} alt="App Logo" className="w-32 h-32 mb-6 object-contain drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]" />
 
-                    <h2 className="text-3xl font-bold text-white mb-4 tracking-tight">Welcome to Spotify Downloader</h2>
+                    <h2 className="text-3xl font-bold text-white mb-4 tracking-tight">Welcome to LiberAudio</h2>
 
                     <p className="text-gray-300 mb-6 leading-relaxed">
                         Download your favorite tracks in high quality.

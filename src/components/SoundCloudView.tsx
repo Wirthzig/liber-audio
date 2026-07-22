@@ -108,33 +108,47 @@ export function SoundCloudView({ onBack }: Props) {
                 const i = queue[qIdx];
 
                 setStatus(i, 'downloading');
-                // Direct download using the specialized download-song (it handles any URL supported by yt-dlp)
-                const res = await window.electronAPI.downloadSong({
-                    url: newSongs[i].url, // Direct SC URL
-                    folder: targetFolder,
-                    artist: newSongs[i].artist,
-                    title: newSongs[i].title
-                });
-
-                if (res.success) {
-                    setStatus(i, 'downloaded');
-                    HistoryManager.add({
-                        id: newSongs[i].id,
-                        source: 'soundcloud',
-                        title: newSongs[i].title,
+                try {
+                    // Direct download using the specialized download-song (it handles any URL supported by yt-dlp)
+                    const res = await window.electronAPI.downloadSong({
+                        url: newSongs[i].url, // Direct SC URL
+                        folder: targetFolder,
                         artist: newSongs[i].artist,
-                        timestamp: Date.now()
+                        title: newSongs[i].title
                     });
-                } else {
+
+                    if (res.success) {
+                        setStatus(i, 'downloaded');
+                        HistoryManager.add({
+                            id: newSongs[i].id,
+                            source: 'soundcloud',
+                            title: newSongs[i].title,
+                            artist: newSongs[i].artist,
+                            timestamp: Date.now()
+                        });
+                    } else {
+                        setStatus(i, 'error');
+                    }
+                } catch (e) {
+                    // A rejected IPC call must not kill the pool — mark this one
+                    // failed and keep going. (Previously this froze the UI: the
+                    // rejection propagated out of Promise.all so setIsProcessing(false)
+                    // never ran and the app needed a restart.)
+                    console.error('Download failed for track', i, e);
                     setStatus(i, 'error');
                 }
             }
         };
 
-        await Promise.all(Array.from({ length: DOWNLOAD_CONCURRENCY }, () => worker()));
-
-        setIsProcessing(false);
-        setStatusMsg(abortRef.current ? 'Stopped' : 'All Done');
+        try {
+            await Promise.all(Array.from({ length: DOWNLOAD_CONCURRENCY }, () => worker()));
+            setStatusMsg(abortRef.current ? 'Stopped' : 'All Done');
+        } catch (e) {
+            console.error('Download batch error', e);
+            setStatusMsg('Some downloads failed — try again');
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     const toggleSelect = (idx: number) => {
