@@ -70,7 +70,7 @@ export function SpotifyView({ onBack }: Props) {
     const EDITORIAL_ERROR = {
         title: 'Spotify blocks this playlist',
         body: "This is one of Spotify's own editorial/algorithmic playlists (Discover Weekly, Daily Mix, Radio, “This Is…”, etc.). Since November 2024 Spotify no longer lets apps read these — even though they look public.",
-        hint: 'Pick a user-created playlist instead and it will work.',
+        hint: 'Easy fix: in Spotify, open this playlist → select all tracks → “Add to playlist” → New playlist. Paste that new playlist’s link here and it will work.',
     };
     const AUTH_ERROR = {
         title: 'Spotify said no',
