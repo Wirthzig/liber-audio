@@ -2,7 +2,7 @@
   "name": "liberaudio",
   "private": true,
   "type": "module",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "main": "dist-electron/main.cjs",
   "repository": {
     "type": "git",

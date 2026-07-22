@@ -978,7 +978,14 @@ app.whenReady().then(async () => {
 
                         let title = entry.title || entry.fulltitle || entry.track || entry.alt_title;
                         let artist = entry.uploader || entry.artist || entry.creator || entry.channel || entry.uploader_id;
-                        const entryUrl = entry.url || entry.webpage_url || entry.original_url || url;
+                        // Prefer the canonical page URL over entry.url. For a single
+                        // SoundCloud track (and full playlist entries) entry.url is the
+                        // short-lived signed HLS *stream* URL — handing that to the
+                        // downloader makes yt-dlp fall back to the generic extractor and
+                        // fail with "Requested format is not available" (and it expires).
+                        // YouTube flat-playlist entries have no webpage_url, so they still
+                        // fall through to entry.url (their page URL) as before.
+                        const entryUrl = entry.webpage_url || entry.url || entry.original_url || url;
 
                         if ((!title || !artist) && entryUrl.includes('soundcloud.com')) {
                             try {
